@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Rust-Agent Control Plane</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+        background-color: #0f172a;
+        color: #f8fafc;
+        font-family: monospace;
+        }
+    </style>
+</head>
+<body class="p-6">
+    <div class="max-w-7xl mx-auto space-y-6">
+        <!-- Header -->
+        <div class="flex justify-between item-center border-b border-slate-700 pb-4">
+            <div>
+                <h1 class="text-2xl font-bold text-sky-400">
+                    RUST-AGENT :: HYBRID CONTROL PLANE
+                </h1>
+                <p class="text-ms text-slate-400">
+                    Proxmox / Docker automomous Infrastucture Harness
+                </p>
+            </div>
+        
+            <span
+            class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-emerald-950 text-emerald-400 border border-emerald-800"
+            >
+            ● Node Active
+            </span>
+        </div>
+
+        <!-- Metrics Overview -->
+        <div class="grid grid-cols-1 md: grid-cols-4 gap-4">
+            <div class="bg-slate-800 p-4 rounded-lg border border-slate-700">
+                <p class="text-slate-400 text-xs">TOTAL TASKS</p>
+                <p id="metric-total" class="text-2xl font-bold text-slate-100">0</p>
+            </div>
+            <div class="bg-slate-800 p-4 rounded-lg border border-slate-700">
+                <p class="text-slate-400 text-xs">AUTO-EXECUTED</p>
+                <p id="metric-executed" class="text-2xl font-bold text-emerald-400">
+                0
+                </p>
+            </div>
+            <div class="bg-slate-800 p-4 rounded-lg border border-slate-700">
+                <p class="text-slate-400 text-xs">PENDING HITL</p>
+                <p id="metric-pending" class="text-2xl font-bold text-amber-400">0</p>
+            </div>
+            <div class="bg-slate-800 p-4 rounded-lg border border-slate-700">
+                <p class="text-slate-400 text-xs">FAILED / REJECTED</p>
+                <p id="metric-failed" class="text-2xl font-bold text-rose-400">0</p>
+            </div>
+        </div>
+
+        <!-- HITL Queue Section -->
+        <div class="bg-slate-800 rounded-lg border border-amber-500/30 p-4">
+            <h2
+            class="text-wm font-bold text-amber-400 mb-3 uppercase tracking-wider"
+            >
+            ▲ Active HITL Approval Queue
+            </h2>
+            <div id="hitl-queue" class="space-y-3">
+                <p class="text-slate-500 text-xs italic">
+                    No tasks currently awaiting approval.
+                </p>
+            </div>
+        </div>
+
+        <!-- Historical Audit Log -->
+        <div class="bg-slate-800 rounded-lg border border-slate-700 p-4">
+            <h2
+            class="text-sm font-bold text-slate-300 mb-3 uppercase tracking-wider"
+            >
+            Historical Task Audit Log
+            </h2>
+            <div class="overflow-x-auto">
+                <table class-="w-full text-left text-sm text-slate-300 table-fixed">
+                    <thread class="bg-slate-800/50 text-slate-400 uppercase text-xs font-semibold">
+                        <tr>
+                            <th class="py-3 px-4 w-1/6">Task ID</th>
+                            <th class="py-3 px-4 w-1/4">Prompt</th>
+                            <th class="py-3 px-4 w-1/4">Proposed Command</th>
+                            <th class="py-3 px-4 w-1/12">Risk</th>
+                            <th class="py-3 px-4 w-1/8">Status</th>
+                            <th class="py-3 px-4 w-1/8 text-right">Action</th>
+                        </tr>
+                    </thread>
+                    <tbody id="audit-table" class="divide-y divide-slate-800">
+                        <!-- Dynamic rows injected here -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Terminal Output Drawer -->
+        <div id="terminal-drawer" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden z-50 flex justify-end transition-opacity">
+            <div class="w-full max-w-xl bg-slate-900 border-l border-slate-800 h-full p-6 flex flex-col justify-between shadow-2xl">
+                <div>
+                <div class="flex items-center justify-between border-b border-slate-800 pb-4 mb-4">
+                    <div>
+                    <h2 class="text-lg font-bold text-slate-100">Task Execution Output</h2>
+                    <p id="drawer-task-id" class="text-xs font-mono text-cyan-400 mt-1"></p>
+                    </div>
+                    <button onclick="closeDrawer()" class="text-slate-400 hover:text-slate-100 font-bold px-2 py-1 text-xl cursor-pointer">
+                    &times;
+                    </button>
+                </div>
+
+                <div class="space-y-4">
+                    <div>
+                    <label class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1 block">STDOUT Output</label>
+                    <pre id="drawer-stdout" class="bg-slate-950 border border-slate-800 rounded p-3 text-xs font-mono text-slate-200 overflow-x-auto max-h-48"></pre>
+                    </div>
+
+                    <div>
+                    <label class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1 block">STDERR Logs</label>
+                    <pre id="drawer-stderr" class="bg-slate-950 border border-slate-800 rounded p-3 text-xs font-mono text-rose-400 overflow-x-auto max-h-48"></pre>
+                    </div>
+                </div>
+                </div>
+
+                <div class="pt-4 border-t border-slate-800">
+                <button onclick="closeDrawer()" class="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded border border-slate-700 cursor-pointer">
+                    Close Drawer
+                </button>
+                </div>
+            </div>
+        </div>
+    <script>
+        window.currentTasks = [];
+        
+        async function fetchDashboardData() {
+            try {
+                const res = await fetch('/api/tasks/history');
+                const tasks = await res.json();
+                window.currentTasks = tasks;
+
+                // Update Metrics
+                document.getElementById('metric-total').innerText = currentTasks.length;
+                document.getElementById('metric-executed').innerText = currentTasks.filter(t => t.status === 'EXECUTED').length;
+                document.getElementById('metric-pending').innerText = currentTasks.filter(t => t.status === 'PENDING').length;
+                document.getElementById('metric-failed').innerText = currentTasks.filter(t => t.status === 'FAILED' || t.status === 'REJECTED').length;
+            
+                // Render HITL Queue
+                const pendingTasks = currentTasks.filter(t => t.status === 'PENDING');
+                const queueContainer = document.getElementById('hitl-queue');
+
+                if (pendingTasks.length === 0) {
+                    queueContainer.innerHTML = '<p class="text-slate-500 text-xs italic">No tasks currently awaiting approval.</p>';  
+                } else {
+                    queueContainer.innerHTML = pendingTasks.map(t => {
+                        const id = t.task_id || t.id;
+                        return `
+                            <div class="bg-slate-900 p-3 rounded border border-amber-500/20 flex justify-between items-center">
+                                <div>
+                                    <span class="text-amber-400 font-bold">[${t.risk_level}]</span>
+                                    <span class="text-slate-200 ml-2">${t.prompt}</span>
+                                    <p class="text-slate-400 text-[11px] font-mono mt-1">$ ${t.proposed_command}</p>
+                                </div>
+                                <div class="space-x-2">
+                                    <button onclick="respondTask('${t.id}', 'APPROVED')" class="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1 rounded text-xs">Approve</button>
+                                    <button onclick="respondTask('${t.id}', 'REJECTED')" class="bg-rose-600 hover:bg-rose-500 text-white px-3 py-1 rounded text-xs">Reject</button>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                }
+
+                //Render Audit Table
+                document.getElementById('audit-table').innerHTML = currentTasks.map(t => {
+                    const taskId = t.task_id || t.id;
+                    return `
+                        <tr class="hover:bg-slate-800/30 transition">
+                            <td class="py-3 px-4 font-mono text-xs text-slate-400 truncate">${t.id}</td>
+                            <td class="py-3 px-4 text-slate-200 font-medium truncate">${t.prompt || 'N/A'}</td>
+                            <td class="py-3 px-4 font-mono text-xs text-amber-400/90 truncate">$ ${t.proposed_command}</td>
+                            <td class="py-3 px-4">
+                            <span class="px-2 py-0.5 text-xs font-semibold rounded bg-slate-800 text-slate-300 border border-slate-700">${t.risk_level}</span>
+                            </td>
+                            <td class="py-3 px-4">
+                            <span class="px-2 py-0.5 text-xs font-semibold rounded ${getStatusStyle(t.status)}">${t.status}</span>
+                            </td>
+                            <td class="py-3 px-4 text-right">
+                            <button onclick="openDrawer('${t.id}')" class="text-xs text-cyan-400 hover:text-cyan-300 font-medium underline cursor-pointer">
+                                Inspect
+                            </button>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+
+            } catch (err) {
+                console.error("Failed to update dashboard data:", err);
+            }
+        }
+
+        function getStatusStyle(status) {
+            switch(status) {
+                case 'EXECUTED': return 'bg-emerald-950/80 text-emerald-400 border border-emerald-800';
+                case 'PENDING': return 'bg-amber-950/80 text-amber-400 border border-amber-800';
+                case 'REJECTED': return 'bg-slate-700 text-slate-300 border border-amber-800';
+                case 'FAILED': return 'bg-rose-950/80 text-rose-400 border border-rose-800';
+                default: return 'bg-slate-800 text-slate-400';
+            }
+        }
+
+        async function respondTask(id, action) {
+            try {
+                const res = await fetch(`/api/tasks/${id}/respond`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action })
+                });
+            
+
+                if (res.ok) {
+                    await fetchDashboardData();
+                } else {
+                    console.error("Failed to post response:", await res.text());
+                }
+            } catch (err) {
+                console.error("Error responsding to task:", err);
+            }
+        }
+
+        function openDrawer(taskId) {
+            const tasks = window.currentTasks || [];
+            const task = tasks.find(t => (t.task_id || t.id) === taskId);
+            if (!task) {
+                console.warn("Task not found in currentTasks:", taskId);
+                return;
+            }
+
+            // Get the ID value from whichever field exists
+            const idValue = task.task_id || task.id;
+
+            document.getElementById('drawer-task-id').innerText = `#${idValue}`;
+            document.getElementById('drawer-stdout').innerText = task.stdout || 'No output recorded.';
+            document.getElementById('drawer-stderr').innerText = task.stderr || 'No errors recorded.';
+
+            // Show drawer overlay
+            document.getElementById('terminal-drawer').classList.remove('hidden');
+        }
+
+        function closeDrawer() {
+            document.getElementById('terminal-drawer').classList.add('hidden');
+        }
+
+        // Poll every 3 seconds
+        setInterval(fetchDashboardData, 3000);
+        fetchDashboardData();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,10 @@
+# Rust build output
+/target/
+
+# SQLite databases
+*.db
+*.db-wal
+*.db-shm
+
+# Environment variables / API keys
+.env
