@@ -1,29 +1,20 @@
-use crate::db::create_task;
 use crate::qdrant::QdrantService;
 use axum::{
-    extract::{Path, State},
+    extract::{Path, State, Json},
     http::StatusCode,
-    response::{Html, IntoResponse},
+    response::Html,
     routing::{get, post},
-    Json, Router,
+    Router,
 };
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use std::sync::{Arc, Mutex};
+use crate::services::sanitizer;
+use crate::monitor::{GeminiCloudClient, AgentMonitor, ExecutionTrace};
 
-#[derive(Deserialize)]
-pub struct CreateTaskRequest {
-    pub task_id: Option<String>,
-    pub id: Option<String>,
-    pub prompt: String,
-    pub proposed_command: Option<String>,
-    pub risk_level: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct OllamaTaskOutput {
-    pub proposed_command: String,
-    pub risk_level: String,
+#[derive(serde::Deserialize)]
+pub struct IngestPayload { 
+    pub text: String,
 }
 
 #[allow(dead_code)]
@@ -64,6 +55,8 @@ pub struct AppState {
     pub pending_tasks: Arc<Mutex<Vec<PendingTask>>>,
     pub qdrant_service: Arc<QdrantService>,
     pub db_pool: SqlitePool,
+    pub monitor: Arc<dyn AgentMonitor>,
+    pub cloud_client: Option<Arc<GeminiCloudClient>>,
 }
 
 #[derive(Deserialize)]
@@ -83,6 +76,32 @@ impl ApprovalPayload {
         }
     }
 }
+
+// pub async fn query_vector_memory_handler(
+//     State(state): State<AppState>,
+//     Json(payload): Json<VectorSearchQueryRequest>,
+// ) -> Result<Json<VectorSearchQueryResponse>, StatusCode> {
+//     // Generate embedding vector for the prompt (using your embedding service / Ollama pipeline)
+//     let query_vector = match state.qdrant_service.get_embedding(&payload.prompt).await {
+//         Ok(vector) => vector,
+//         Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
+//     };
+
+//     // Determine limit (default to 20 or user-specific)
+//     let limit = payload.limit.unwrap_or(20);
+
+//     // Call Qdrant Service search method (matching your qdrant.rs signature)
+//     let search_results = state
+//         .qdrant_service
+//         .search(query_vector, limit)
+//         .await
+//         .unwrap_or_default();
+
+//     Ok(Json(VectorSearchQueryResponse {
+//         status: "success".to_string(),
+//         results: search_results,
+//     }))
+// }
 
 pub async fn get_task_history(
     State(state): State<AppState>,
@@ -114,6 +133,8 @@ pub async fn execute_and_record_task(
     _risk_level: &str,
 ) -> (StatusCode, Json<ApiResponse>) {
     // 1. Run the command directly
+    println!("[DEBUG EXEC] Running command string: '{}'", command);
+
     let output = std::process::Command::new("sh")
         .arg("-c")
         .arg(command)
@@ -167,176 +188,23 @@ pub async fn execute_and_record_task(
         StatusCode::OK,
         Json(ApiResponse {
             status: final_status.to_string(),
-            message: format!("Command '{}' executed.", command),
+            message: sanitizer::sanitize(&format!("Command '{}' executed.", command)),
             task_id: Some(task_id.to_string()),
         }),
     )
 }
 
-// Axum Handler that accepts JSON and calls your db helper
-pub async fn create_task_handler(
-    State(state): State<AppState>,
-    Json(payload): Json<CreateTaskRequest>,
-) -> impl IntoResponse {
-    // Fall back to task_id or default if id isn't passed directly
-    let task_id = payload
-        .task_id
-        .or(payload.id)
-        .unwrap_or_else(|| format!("task-{}", uuid::Uuid::new_v4()));
-
-    let (final_command, final_risk) = match (payload.proposed_command, payload.risk_level) {
-        // Direct Task Submission Mode (explicit command provided)
-        (Some(cmd), Some(risk)) => (cmd, risk),
-
-        // AI Planning Mode (Only prompt/goal provided -> Use RAG + Ollama)
-        _ => {
-            // 1. Fetch RAG Context from Qdrant if available
-            let qdrant = &state.qdrant_service;
-            let rag_context = match qdrant.get_embedding(&payload.prompt).await {
-                Ok(vector) => match qdrant.search(vector, 3).await {
-                    Ok(snippets) if !snippets.is_empty() => snippets.join("\n---\n"),
-                    _ => "No prior execution history found.".to_string(),
-                },
-                Err(_) => "Failed to generate query embedding.".to_string(),
-            };
-
-            // 2. Prompt Ollama for command generation
-            let system_prompt = format!(
-                r#"
-You are an autonomous Linux system administrator agent.
-Convert the following goal into a single safe bash command.
-
-RAG Execution Context from Past Tasks:
-{}
-
-User Goal:
-{}
-
-Respond STRICTLY with a valid JSON object matching this schema:
-{{
-    "proposed_command":"exact single bash command",
-    "risk_level": "LOW | MEDIUM | HIGH"
-}}"#,
-                rag_context, payload.prompt
-            );
-
-            let ollama_host = std::env::var("OLLAMA_API_URL")
-                .unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
-            let ollama_model =
-                std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| "llama3.2:3b".to_string());
-
-            let endpoint = format!("{}/api/generate", ollama_host.trim_end_matches('/'));
-
-            let http_client = reqwest::Client::new();
-            let ollama_res = http_client
-                .post(&endpoint)
-                .json(&serde_json::json!({
-                    "model": ollama_model,
-                    "prompt": system_prompt,
-                    "stream": false,
-                    "format": "json"
-                }))
-                .send()
-                .await;
-
-            match ollama_res {
-                Ok(res) => {
-                    if let Ok(body) = res.json::<serde_json::Value>().await {
-                        if let Some(raw_str) = body["response"].as_str() {
-                            if let Ok(task_out) = serde_json::from_str::<OllamaTaskOutput>(raw_str)
-                            {
-                                (task_out.proposed_command, task_out.risk_level)
-                            } else {
-                                return (
-                                    StatusCode::INTERNAL_SERVER_ERROR,
-                                    Json(
-                                        serde_json::json!({"error": "Failed to parse Ollama JSON response."}),
-                                    ),
-                                );
-                            }
-                        } else {
-                            return (
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                Json(serde_json::json!({"error": "Empty response from Ollama."})),
-                            );
-                        }
-                    } else {
-                        return (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(serde_json::json!({"error": "Invalid JSON response."})),
-                        );
-                    }
-                }
-                Err(e) => {
-                    return (
-                        StatusCode::BAD_GATEWAY,
-                        Json(
-                            serde_json::json!({"error": format!("Ollama connection error: {}", e) }),
-                        ),
-                    );
-                }
-            }
-        }
-    };
-
-    //Auto-approve LOW risk tasks, otherwise start as PENDING
-    if final_risk.to_uppercase() == "LOW" {
-        // Persist initial record first
-        let _ = crate::db::create_task(
-            &state.db_pool,
-            &task_id,
-            &payload.prompt,
-            &final_command,
-            &final_risk,
-            "APPROVED",
-        )
-        .await;
-
-        // Execute immediately using the shared runner
-        let (status, Json(res)) = execute_and_record_task(
-            &state,
-            &task_id,
-            &payload.prompt,
-            &final_command,
-            &final_risk,
-        )
-        .await;
-
-        (status, Json(serde_json::to_value(res).unwrap_or_default()))
-    } else {
-        // Save HIGH/MEDIUM tasks as PENDING for HITL review
-        match create_task(
-            &state.db_pool,
-            &task_id,
-            &payload.prompt,
-            &final_command,
-            &final_risk,
-            "PENDING",
-        )
-        .await
-        {
-            Ok(_) => (
-                StatusCode::CREATED,
-                Json(serde_json::json!({
-                    "status": "PENDING",
-                    "id": task_id,
-                    "proposed_command": final_command,
-                    "risk_level": final_risk,
-                })),
-            ),
-            Err(e) => {
-                eprintln!("Failed to insert task: {}", e);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({ "error": e.to_string() })),
-                )
-            }
-        }
-    }
-}
 
 async fn serve_dashboard() -> Html<&'static str> {
     Html(include_str!("../static/index.html"))
+}
+
+async fn serve_submit() -> Html<&'static str> {
+    Html(include_str!("../static/submit.html"))
+}
+
+async fn serve_search_page() -> Html<&'static str> {
+    Html(include_str!("../static/search.html"))
 }
 
 //  Fetch all pending tasks awaiting approval
@@ -431,16 +299,92 @@ pub async fn approve_task(
     }
 }
 
+pub async fn get_monitor_traces(
+    State(state): State<AppState>,
+) -> (StatusCode, Json<Vec<ExecutionTrace>>) {
+    let traces = state.monitor.get_recent_traces(50).await;
+    (StatusCode::OK, Json(traces))
+}
+
+pub async fn ingest_memory_handler(
+    State(state): State<AppState>,
+    Json(payload): Json<IngestPayload>,
+) -> (StatusCode, Json<ApiResponse>) {
+    let memory_id = format!("mem-{}", uuid::Uuid::new_v4());
+
+    let _ = crate::db::create_task(
+        &state.db_pool,
+        &memory_id,
+        &payload.text,
+        "MEMORY_INGEST",
+        "LOW",
+        "PROCESSING"
+    ).await;
+
+    // Ingest directly into Qdrant vector memory without running shell commands
+    let result = state
+        .qdrant_service
+        .ingest_task_execution(
+            &memory_id,
+            &payload.text,
+            "MEMORY_INGEST",
+            &payload.text,
+            "",
+            "STORED",
+        )
+        .await;
+
+    match result {
+        Ok(_) => {
+            if let Err(e)  = crate::db::update_task_execution(
+                &state.db_pool,
+                &memory_id,
+                "STORED",
+                Some(&payload.text),
+                Some(""),
+            ).await {
+                eprintln!("[DB ERROR] Failed to record memory ingestion for {}: {}", memory_id, e);
+            }
+
+            (
+                StatusCode::OK,
+                Json(ApiResponse {
+                    status: "SUCCESS".to_string(),
+                    message: "Context memory successfully ingested into Qdrant".to_string(),
+                    task_id: Some(memory_id),
+                }),
+            )
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                status: "ERROR".to_string(),
+                message: format!("Failed to ingest vector memory: {:?}", e),
+                task_id: None,
+            }),
+        ),
+    }
+}
+
 // Initialize Axum Router
 pub fn create_router(app_state: AppState) -> Router {
     Router::new()
         .route("/", get(serve_dashboard))
-        .route("/api/v1/agent/task", post(create_task_handler))
+        .route("/submit", get(serve_submit))
+        .route("/api/v1/monitor/traces", get(get_monitor_traces))
+        .route("/api/v1/agent/task", post(crate::handlers::command::handle_task_submission))
         .route("/api/v1/tasks/pending", get(get_pending_tasks))
         .route("/api/v1/tasks/:task_id/approve", post(approve_task))
+
+        // New: Memory Ingest Route
+        .route("/api/ingest", post(ingest_memory_handler))
+
         // New: Task Audit Log & Respond Routes
-        .route("/api/tasks", post(create_task_handler))
+        .route("/api/tasks", post(crate::handlers::command::handle_task_submission))
         .route("/api/tasks/history", get(get_task_history))
         .route("/api/tasks/:id/respond", post(approve_task))
+        .route("/api/memory/search", post(crate::handlers::rag::query_vector_memory_handler))
+        .route("/search", get(serve_search_page))
         .with_state(app_state)
 }
+

@@ -1,162 +1,77 @@
 use std::env;
 use std::net::TcpStream;
-use std::sync::Arc;
+use mail_parser::MessageParser;
+use std::future::Future;
 
-//use native_tls::TlsConnector;
+use crate::tools::mask_ip_or_url;
 
-pub struct ImapListenerConfig {
-    pub server: String,
-    pub port: u16,
-    pub email: String,
-    pub token: String,
-}
-
-impl ImapListenerConfig {
-    pub fn from_env() -> Self {
-        let _ = dotenvy::dotenv();
-
-        Self {
-            server: env::var("IMAP_SERVER").unwrap_or_else(|_| "192.168.0.18".to_string()),
-            port: env::var("IMAP_PORT")
-                .unwrap_or_else(|_| "143".to_string())
-                .parse::<u16>()
-                .unwrap_or(143),
-            email: env::var("IMAP_EMAIL").unwrap_or_else(|_| "test@sandbox.local".to_string()),
-            token: env::var("IMAP_TOKEN").unwrap_or_else(|_| "password123".to_string()),
-        }
-    }
-}
-
-fn mask_ip(ip: &str) -> String {
-    let parts: Vec<&str> = ip.split('.').collect();
-    if parts.len() == 4 {
-        format!("{}.{}.*.*", parts[0], parts[1])
-    } else {
-        "***.***.*.*".to_string()
-    }
-}
-
-pub async fn start_mailbox_stream<F, Fut>(
-    //  config: ImapListenerConfig,
-    on_email_received: F,
-) -> Result<(), Box<dyn std::error::Error>>
+pub async fn start_imap_listener<F, Fut>(handler: F) -> Result<(), Box<dyn std::error::Error>> 
 where
     F: Fn(String, String) -> Fut + Send + Sync + 'static,
-    Fut: std::future::Future<Output = ()> + Send + 'static,
+    Fut: Future<Output = ()> + Send,
 {
-    let config = ImapListenerConfig::from_env();
-    let on_email = Arc::new(on_email_received);
+    let host = env::var("IMAP_SERVER").unwrap_or_else(|_| "127.0.0.1".to_string());
+    let port: u16 = env::var("IMAP_PORT")
+        .unwrap_or_else(|_| "143".to_string())
+        .parse()?;
+    let username = env::var("IMAP_USERNAME").unwrap_or_else(|_| "agent@sandbox.local".to_string());
+    let password = env::var("IMAP_PASSWORD").unwrap_or_default();
 
-    // Run the blocking IMAP listener on a dedicated OS thread pool managed by Tokio
-    tokio::task::spawn_blocking(move || -> Result<(), String> {
-        println!(
-            "[IMAP Daemon] Connecting securely to {}:{}...",
-            mask_ip(&config.server),
-            config.port
-        );
+    println!("[IMAP] Connecting to {}:{}...", mask_ip_or_url(&host), port);
 
-        let stream =
-            TcpStream::connect((config.server.as_str(), config.port)).map_err(|e| e.to_string())?;
+    // Establish TCP Connection
+    let stream = TcpStream::connect((host.as_str(), port))?;
+    let client = imap::Client::new(stream);
 
-        let client = imap::Client::new(stream);
+    // Authenticate with Dovecot
+    let mut session = client
+        .login(&username, &password)
+        .map_err(|(err,_client)| err)?;
+    
+    println!("[IMAP] Authenticate successfully as {}", username);
 
-        let mut imap_session = client
-            .login(&config.email, &config.token)
-            .map_err(|(err, _returned_client)| err.to_string())?;
+    // Select INBOX
+    session.select("INBOX")?;
 
-        imap_session.select("INBOX").map_err(|e| e.to_string())?;
-        println!("[IMAP Daemon] Authenticated! Real-time mailbox streaming active.");
+    // Search for unread/unseen messages
+    let unseen_sequence = session.search("UNSEEN")?;
 
-        if let Ok(search_results) = imap_session.search("ALL") {
-            println!(
-                "[IMAP Daemon] Boot check found {} messages in INBOX",
-                search_results.len()
-            );
-        }
+    if unseen_sequence.is_empty() {
+        println!("[IMAP] No unseen emails found.");
+        session.logout()?;
+        return Ok(());
+    }
 
-        loop {
-            println!("[IMAP Daemon] Entering IDLE sleep mode, waiting for server push...");
-            {
-                // Blocks the thread efficiently until the mail server notifies us of a change
-                let mut idle_handle = imap_session.idle();
-                idle_handle.keepalive(true);
+    println!("[IMAP] Found {} unseen email(s)", unseen_sequence.len());
 
-                // The Handle acts as an iterator. Reading from it blocks the thread efficiently
-                // unti a network line pushes from the mail server.
-                idle_handle
-                    .wait_while(imap::extensions::idle::stop_on_any)
-                    .map_err(|e| e.to_string())?;
-                println!("[IMAP Daemon] 🔔 Server notification received!");
-            }
-            println!("[IMAP Daemon] Mailbox woke up! Checking for new messages...");
+    let parser = MessageParser::default();
 
-            std::thread::sleep(std::time::Duration::from_millis(500));
+    // Fetch unseen messages
+    for seq in unseen_sequence.iter() {
+        let fetches = session.fetch(seq.to_string(), "BODY[]")?;
 
-            // Search for unread emails
-            let search_results = imap_session.search("UNSEEN").map_err(|e| e.to_string())?;
+        // Iterate over fetched messages
+        for message in fetches.iter() {
+            if let Some(body) = message.body() {
+                if let Some(parsed) = parser.parse(body) {
+                    let sender = parsed
+                        .from()
+                        .and_then(|f| f.first())
+                        .map(|a| a.address().unwrap_or("unknown"))
+                        .unwrap_or("unknown");
+                    let _subject = parsed.subject().unwrap_or("No subject");
+                    let raw_body = parsed
+                        .body_text(0)
+                        .map(|b| b.to_string())
+                        .unwrap_or_else(|| "Empty body".to_string());
 
-            if let Some(&latest_mail_id) = search_results.iter().last() {
-                let messages = imap_session
-                    .fetch(latest_mail_id.to_string(), "(ENVELOPE BODY[TEXT])")
-                    .map_err(|e| e.to_string())?;
-
-                if let Some(message) = messages.iter().next() {
-                    let sender = message
-                        .envelope()
-                        .and_then(|e| e.from.as_ref().and_then(|from_list| from_list.first()))
-                        .map(|f| {
-                            let mailbox_bytes = f
-                                .mailbox
-                                .as_ref()
-                                .map(|cow| cow.as_ref())
-                                .unwrap_or(b"unknown");
-                            let host_bytes = f
-                                .host
-                                .as_ref()
-                                .map(|cow| cow.as_ref())
-                                .unwrap_or(b"sender.com");
-
-                            format!(
-                                "{}@{}",
-                                String::from_utf8_lossy(mailbox_bytes),
-                                String::from_utf8_lossy(host_bytes)
-                            )
-                        })
-                        .unwrap_or_else(|| "unknown@sender.com".to_string());
-
-                    let body = message
-                        .text() // Extracts segment 1 text directly
-                        .map(|b| String::from_utf8_lossy(b).trim().to_string())
-                        .unwrap_or_default();
-
-                    println!("\n=================================================================");
-                    println!("{}", body);
-                    println!(
-                        "===================================================================\n"
-                    );
-
-                    // Mark as read
-                    imap_session
-                        .store(latest_mail_id.to_string(), "+FLAGS (\\Seen)")
-                        .map_err(|e| e.to_string())?;
-
-                    println!("[IMAP Daemon] 🔔 New email intercepted from: {}", sender);
-
-                    // Bridge the email details back into our main async Rig runtime context!
-                    let on_email_clone = on_email.clone();
-                    let sender_clone = sender.clone();
-                    let body_clone = body.clone();
-
-                    tokio::runtime::Handle::current().spawn(async move {
-                        on_email_clone(sender_clone, body_clone).await;
-                    });
+                    handler(sender.to_string(), raw_body).await;                    
                 }
             }
         }
-    })
-    .await
-    .map_err(|e| e.to_string())?
-    .map_err(|e| e)?;
+    }
 
+    session.logout()?;
     Ok(())
+
 }

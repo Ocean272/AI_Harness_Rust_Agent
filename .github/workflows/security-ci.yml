@@ -1,0 +1,41 @@
+name: Security & Audit CI
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+    branches: ["main", "master"]
+  #Schedule a weekly scan every Monday at 00:00 UTC to catch newly published CVEs
+  schedule:
+    - cron: '0 0 * * 1'
+
+jobs:
+  audit-and-check:
+    name: Security Scan & Build Verification
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+        
+      - name: Cache Cargo Dependencies
+        uses: Swatinem/rust-cache@v2
+      
+      # 1. Dependency Vulnerability Audit
+      - name: Run cargo-audit
+        uses: rustsec/audit-check@v1.4.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # 2. Code Quality & Unsaafe Checks (Fail on warnings)
+      - name: Run Clippy Linter
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      # 3. Build Verification
+      - name: Run Cargo Check
+        run: cargo check --all-targets --all-features

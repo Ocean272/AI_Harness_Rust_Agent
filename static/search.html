@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Qdrant Memory Search</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-zinc-950 text-zinc-100 min-h-screen p6">
+    <div class="max-w-3xl mx-auto">
+        <h1 class="text-3xl font-bold mb-6 tracking-tight">Agent Memory & Vector Search</h1>
+
+        <!-- Search Form -->
+        <form id="search-form" class="flex gap-3 mb-8">
+            <input
+                type="text"
+                id="search-prompt"
+                placeholder="Query execution logs or memories (e.g., system storage)"
+                required
+                class="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 text-zinc-100 focus:outline-none focus:border-blue-600 transistion"
+            >
+            <button
+                type="submit"
+                id="search-btn"
+                class="bg-blue-600 hover:bg-blue-500 font-medium px-6 py-3 rounded-lg transistion disable:opacity-50"
+            >
+                Search
+            </button>
+        </form>
+        <!-- Results Container -->
+         <div id="results-container" class="space-y-4">
+            <p class="text-zinc-500 text-center py-8">Enter a query above to search Qdrant memory.</p>
+         </div>
+    </div>
+    <script>
+        const form = document.getElementById('search-form');
+        const promptInput = document.getElementById('search-prompt');
+        const searchBtn = document.getElementById('search-btn');
+        const resultsContainer = document.getElementById('results-container');
+
+        function renderSnippetCard(snippet) {
+            let lines = snippet
+                .split('\n')
+                .map(line => line.trim());
+            
+            // Filter out empty labels (Command:, Stdout:, Stderr:) if they have no values
+            if(snippet.includes("MEMORY_INGEST:")) {
+                lines = lines.filter(line => 
+                    !line.startsWith("Command:") &&
+                    !line.startsWith("Stdout:") &&
+                    !line.startsWith("Stderr:")
+                );
+            }
+
+            const formattedText = lines.join('\n').trim();
+                
+            return ` 
+                <div class="bg-zinc-900 border border-zinc-800 rounded-lg p-4 font-mono text-sm text-zinc-300 shadow-sm leading-relaxed mb-4">
+                    <div class="whitespace-pre-wrap">${escapeHtml(formattedText)}</div>
+                </div>
+            `;
+        }
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const prompt = promptInput.value.trim();
+            if(!prompt) return;
+
+            searchBtn.disable = true;
+            searchBtn.textContent = 'Searching...';
+            resultsContainer.innerHTML = '<p class="text-zinc-400 text-center py-8">Querying vector space...</p>';
+
+            try {
+                const response = await fetch('/api/memory/search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt: prompt, limit: 5 })
+                });
+
+                const data = await response.json();
+
+                if(data.status === 'success' && data.results && data.results.length > 0) {
+                    resultsContainer.innerHTML  = data.results.map(renderSnippetCard).join('');
+                } else {
+                    resultsContainer.innerHTML = '<p class="text-zinc-500 text-center py-8">No matching memory snippets found.</p>';
+                }
+            } catch (err) {
+                console.error(err);
+                resultsContainer.innerHTML = '<p class="text-red-400 text-center py-8">Failed to connect to the backend server.</p>';
+            } finally {
+                searchBtn.disabled = false;
+                searchBtn.textContent = 'Search';
+            }
+        });
+
+        function escapeHtml(text) {
+            return text
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;")
+        }
+    </script>
+    
+</body>
+</html>

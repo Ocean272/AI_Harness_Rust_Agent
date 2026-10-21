@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rust Axum Task Queue Dashboard</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            500: '#6366f1',
+                            600: '#4f46e5',
+                            700: '#4338ca',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        code, pre { font-family: 'JetBrains+Mono', monospace; }
+        /* Custom Glowing Effect for Buttons and Highlights */
+        .glow-indigo {
+            box-shadow: 0 0 15px -3px rgba(99, 102, 241, 0.4);
+        }
+        .glow-indigo:hover {
+            box-shadow: 0 0 20px 0px rgba(99, 102, 241, 0.6);
+        }
+        /* Custom scrollbar for dark mode */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0f172a;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #475569;
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col antialiased selection:bg-indigo-500 selection:teio
+
+    <!-- Top Header -->
+    <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur-md sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="h-9 w-9 rounded-lg bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 font-bold text-lg shadow-inner">
+                    ⚙️
+                </div>
+                <div>
+                    <h1 class="text-lg font-bold text-slate-100 leading-tight">Axum Task Agent</h1>
+                    <p class="text-xs text-slate-400">Rust Queue & SQLite Integration</p>
+                </div>
+            </div>
+            
+            <div class="flex items-center space-x-4">
+                <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                    <span class="w-2 h-2 rounded-full bg-emerald-400 mr-2 animate-pulse"></span>
+                    Backend Online
+                </span>
+                <button id="refresh-tasks-btn" onclick="fetchTaskHistory()" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors border border-slate-700" title="Refresh Tasks">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Alert Notifications Banner -->
+    <div id="notification-banner" class="hidden transition-all duration-300">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4">
+            <div id="notification-card" class="p-4 rounded-xl border flex items-start justify-between">
+                <div class="flex items-start space-x-3">
+                    <span id="notification-icon" class="text-lg"></span>
+                    <div>
+                        <h4 id="notification-title" class="text-sm font-semibold"></h4>
+                        <p id="notification-msg" class="text-xs mt-0.5 text-slate-300"></p>
+                    </div>
+                </div>
+                <button onclick="hideNotification()" class="text-slate-400 hover:text-slate-200">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content Grid -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+        <!-- Left Column: Submission Form (7 Cols) -->
+        <section class="lg:col-span-7 flex flex-col space-y-6">
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl relative overflow-hidden">
+                <!-- Glowing ambient background gradient -->
+                <div class="absolute -top-24 -right-24 w-48 h-48 bg-indigo-600/10 rounded-full blur-3xl pointer-events-none"></div>
+
+                <!-- Mode Toggle Tabs -->
+                <div class="flex items-center justify-between mb-6 pb-4 border-b border-slate-800">
+                    <h2 class="text-base font-semibold text-slate-200">Submit New Task</h2>
+                    <div class="bg-slate-950 p-1 rounded-xl border border-slate-800 flex space-x-1">
+                        <button type="button" id="tab-cmd" onclick="switchMode('cmd')" class="px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 bg-indigo-600 text-white shadow-sm glow-indigo">
+                            ⚡ Command Task
+                        </button>
+                        <button type="button" id="tab-rag" onclick="switchMode('rag')" class="px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 text-slate-400 hover:text-slate-200">
+                            🔍 Normal RAG Query
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Form -->
+                <form id="task-form" onsubmit="handleFormSubmit(event)" class="space-y-5">
+                    <!-- Prompt / Goal Body -->
+                    <div>
+                        <label for="prompt" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">
+                            User Prompt / Task Goal <span class="text-indigo-400">*</span>
+                        </label>
+                        <textarea id="prompt" rows="3" required oninput="updateJsonPreview()"
+                            class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+                            placeholder="e.g. Inspect file disk usage or ingest research paper contents..."></textarea>
+                    </div>
+
+                    <!-- Command Mode Options -->
+                    <div id="cmd-fields" class="space-y-5">
+                        <div>
+                            <label for="proposed-cmd" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">
+                                Proposed Shell Command
+                            </label>
+                            <input type="text" id="proposed-cmd" oninput="updateJsonPreview()"
+                                class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm font-mono text-indigo-300 placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+                                placeholder="df -h || ls -la">
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">
+                                Risk Level Assessment
+                            </label>
+                            <div class="grid grid-cols-3 gap-3">
+                                <label class="relative flex items-center justify-center p-3 rounded-xl border border-slate-800 bg-slate-950/60 cursor-pointer hover:border-slate-700 transition-all">
+                                    <input type="radio" name="risk_level" value="SAFE" checked onchange="updateJsonPreview()" class="sr-only peer">
+                                    <span class="text-xs font-semibold text-emerald-400 peer-checked:text-emerald-300">SAFE</span>
+                                    <span class="absolute inset-0 rounded-xl border-2 border-emerald-500/0 peer-checked:border-emerald-500/80 peer-checked:bg-emerald-500/5 transition-all"></span>
+                                </label>
+                                <label class="relative flex items-center justify-center p-3 rounded-xl border border-slate-800 bg-slate-950/60 cursor-pointer hover:border-slate-700 transition-all">
+                                    <input type="radio" name="risk_level" value="HIGH" onchange="updateJsonPreview()" class="sr-only peer">
+                                    <span class="text-xs font-semibold text-amber-400 peer-checked:text-amber-300">HIGH</span>
+                                    <span class="absolute inset-0 rounded-xl border-2 border-amber-500/0 peer-checked:border-amber-500/80 peer-checked:bg-amber-500/5 transition-all"></span>
+                                </label>
+                                <label class="relative flex items-center justify-center p-3 rounded-xl border border-slate-800 bg-slate-950/60 cursor-pointer hover:border-slate-700 transition-all">
+                                    <input type="radio" name="risk_level" value="CRITICAL" onchange="updateJsonPreview()" class="sr-only peer">
+                                    <span class="text-xs font-semibold text-rose-400 peer-checked:text-rose-300">CRITICAL</span>
+                                    <span class="absolute inset-0 rounded-xl border-2 border-rose-500/0 peer-checked:border-rose-500/80 peer-checked:bg-rose-500/5 transition-all"></span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- RAG Mode Option -->
+                    <div id="rag-fields" class="hidden space-y-4">
+                        <div class="flex items-center space-x-3 p-3 bg-indigo-950/30 border border-indigo-800/40 rounded-xl">
+                            <input type="checkbox" id="memory-ingest-toggle" onchange="toggleMemoryPrefix()" class="rounded border-slate-700 bg-slate-950 text-indigo-600 focus:ring-indigo-500 h-4 w-4">
+                            <label for="memory-ingest-toggle" class="text-xs text-slate-300 font-medium cursor-pointer">
+                                Enable <code class="bg-indigo-900/50 px-1 py-0.5 rounded text-indigo-300 font-mono">MEMORY_INGEST</code> prefix
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Submit Button -->
+                    <div class="pt-2">
+                        <button type="submit" id="submit-btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-3 px-4 rounded-xl shadow-lg glow-indigo transition-all duration-200 flex items-center justify-center space-x-2">
+                            <span>Dispatch Task to Queue</span>
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Live JSON Preview Box -->
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col">
+                <div class="flex items-center justify-between mb-3">
+                    <span class="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center space-x-2">
+                        <span class="w-2 h-2 rounded-full bg-indigo-400"></span>
+                        <span>Live JSON Payload Preview</span>
+                    </span>
+                    <button onclick="copyJsonPreview()" class="text-xs text-slate-400 hover:text-slate-200 bg-slate-800 px-2 py-1 rounded border border-slate-700 transition-colors">
+                        Copy
+                    </button>
+                </div>
+                <div class="bg-slate-950 rounded-xl border border-slate-800/80 p-4 font-mono text-xs text-slate-300 overflow-x-auto">
+                    <pre id="json-preview">{}</pre>
+                </div>
+            </div>
+        </section>
+
+        <!-- Right Column: Task History Table (5 Cols) -->
+        <section class="lg:col-span-5 flex flex-col">
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex-1 flex flex-col">
+                <div class="flex items-center justify-between mb-4 pb-3 border-b border-slate-800">
+                    <div>
+                        <h3 class="text-base font-semibold text-slate-200">SQLite Task History</h3>
+                        <p class="text-xs text-slate-400">Fetched from <code class="text-indigo-400">/api/tasks</code></p>
+                    </div>
+                    <span id="task-count" class="text-xs bg-slate-800 text-slate-300 border border-slate-700 px-2.5 py-1 rounded-full font-mono">0 tasks</span>
+                </div>
+
+                <!-- Task History List -->
+                <div class="flex-1 overflow-y-auto max-h-[560px] space-y-3 pr-1" id="task-history-list">
+                    <!-- Loading Skeleton / Empty State -->
+                    <div id="loading-spinner" class="text-center py-12 text-slate-500 space-y-2">
+                        <div class="inline-block animate-spin rounded-full h-6 w-6 border-2 border-indigo-500 border-t-transparent"></div>
+                        <p class="text-xs">Fetching task history...</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="border-t border-slate-800 bg-slate-900/50 py-4 mt-auto">
+        <div class="max-w-7xl mx-auto px-4 text-center text-xs text-slate-500">
+            Rust Axum Task Agent Dashboard &bull; Dark Mode UI Served via <code class="text-slate-400">static/index.html</code>
+        </div>
+    </footer>
+
+    <script>
+        // State
+        let currentMode = 'cmd'; // 'cmd' or 'rag'
+
+        // DOM elements
+        const promptInput = document.getElementById('prompt');
+        const proposedCmdInput = document.getElementById('proposed-cmd');
+        const jsonPreview = document.getElementById('json-preview');
+        const cmdFields = document.getElementById('cmd-fields');
+        const ragFields = document.getElementById('rag-fields');
+        const tabCmd = document.getElementById('tab-cmd');
+        const tabRag = document.getElementById('tab-rag');
+        const memoryIngestToggle = document.getElementById('memory-ingest-toggle');
+
+        // Mode Switcher
+        function switchMode(mode) {
+            currentMode = mode;
+            if (mode === 'cmd') {
+                cmdFields.classList.remove('hidden');
+                ragFields.classList.add('hidden');
+                tabCmd.className = "px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 bg-indigo-600 text-white shadow-sm glow-indigo";
+                tabRag.className = "px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 text-slate-400 hover:text-slate-200";
+            } else {
+                cmdFields.classList.add('hidden');
+                ragFields.classList.remove('hidden');
+                tabRag.className = "px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 bg-indigo-600 text-white shadow-sm glow-indigo";
+                tabCmd.className = "px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 text-slate-400 hover:text-slate-200";
+            }
+            updateJsonPreview();
+        }
+
+        // Prefix Toggle for RAG Mode
+        function toggleMemoryPrefix() {
+            let val = promptInput.value;
+            const prefix = "MEMORY_INGEST: ";
+            if (memoryIngestToggle.checked) {
+                if (!val.startsWith(prefix)) {
+                    promptInput.value = prefix + val;
+                }
+            } else {
+                if (val.startsWith(prefix)) {
+                    promptInput.value = val.substring(prefix.length);
+                }
+            }
+            updateJsonPreview();
+        }
+
+        // Construct JSON payload
+        function getPayload() {
+            const promptVal = promptInput.value || "";
+            if (currentMode === 'cmd') {
+                const selectedRisk = document.querySelector('input[name="risk_level"]:checked')?.value || "SAFE";
+                return {
+                    task_type: "command",
+                    prompt: promptVal,
+                    proposed_command: proposedCmdInput.value || "",
+                    risk_level: selectedRisk,
+                    created_at: new Date().toISOString()
+                };
+            } else {
+                return {
+                    task_type: "query",
+                    prompt: promptVal,
+                    proposed_command: "",
+                    risk_level: "SAFE",
+                    is_memory_ingest: memoryIngestToggle.checked,
+                    created_at: new Date().toISOString()
+                };
+            }
+        }
+
+        // Update JSON Live Preview
+        function updateJsonPreview() {
+            const payload = getPayload();
+            jsonPreview.textContent = JSON.stringify(payload, null, 2);
+        }
+
+        // Copy JSON Preview
+        function copyJsonPreview() {
+            const text = jsonPreview.textContent;
+            navigator.clipboard.writeText(text);
+            showNotification('success', 'Copied', 'JSON payload copied to clipboard');
+        }
+
+        // Notification Banner
+        function showNotification(type, title, message) {
+            const banner = document.getElementById('notification-banner');
+            const card = document.getElementById('notification-card');
+            const icon = document.getElementById('notification-icon');
+            const titleEl = document.getElementById('notification-title');
+            const msgEl = document.getElementById('notification-msg');
+
+            if (type === 'success') {
+                card.className = "p-4 rounded-xl border flex items-start justify-between bg-emerald-950/40 border-emerald-800/60 text-emerald-200";
+                icon.textContent = "✅";
+            } else {
+                card.className = "p-4 rounded-xl border flex items-start justify-between bg-rose-950/40 border-rose-800/60 text-rose-200";
+                icon.textContent = "❌";
+            }
+
+            titleEl.textContent = title;
+            msgEl.textContent = message;
+            banner.classList.remove('hidden');
+
+            setTimeout(() => {
+                hideNotification();
+            }, 4000);
+        }
+
+        function hideNotification() {
+            document.getElementById('notification-banner').classList.add('hidden');
+        }
+
+        // Handle Task Submission to Axum Endpoint
+        async function handleFormSubmit(event) {
+            event.preventDefault();
+            const payload = getPayload();
+            const submitBtn = document.getElementById('submit-btn');
+
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = `<span>Dispatching...</span>`;
+
+            try {
+                const response = await fetch('/api/tasks', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                if (response.ok) {
+                    showNotification('success', 'Task Submitted', 'Task successfully posted to Axum backend SQLite queue.');
+                    promptInput.value = '';
+                    proposedCmdInput.value = '';
+                    if (memoryIngestToggle) memoryIngestToggle.checked = false;
+                    updateJsonPreview();
+                    fetchTaskHistory(); // Refresh list
+                } else {
+                    const errText = await response.text();
+                    showNotification('error', 'Submission Failed', `Server returned status ${response.status}: ${errText}`);
+                }
+            } catch (err) {
+                showNotification('error', 'Network Error', `Could not reach Axum endpoint at /api/tasks. ${err.message}`);
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = `<span>Dispatch Task to Queue</span><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>`;
+            }
+        }
+
+        // Fetch Tasks from SQLite endpoint
+        async function fetchTaskHistory() {
+            const listEl = document.getElementById('task-history-list');
+            const countEl = document.getElementById('task-count');
+
+            try {
+                const response = await fetch('/api/tasks/history');
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                
+                const tasks = await response.json();
+                countEl.textContent = `${tasks.length} task${tasks.length === 1 ? '' : 's'}`;
+
+                if (tasks.length === 0) {
+                    listEl.innerHTML = `
+                        <div class="text-center py-10 text-slate-500 border border-dashed border-slate-800 rounded-xl">
+                            <p class="text-xs">No tasks in queue.</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                listEl.innerHTML = tasks.map(task => {
+                    const isCmd = task.task_type === 'command';
+                    const riskBadge = isCmd ? getRiskBadge(task.risk_level) : '';
+                    
+                    return `
+                        <div class="p-3.5 bg-slate-950 border border-slate-800/90 rounded-xl space-y-2 hover:border-slate-700 transition-colors">
+                            <div class="flex items-center justify-between text-xs">
+                                <span class="font-semibold px-2 py-0.5 rounded text-[10px] ${isCmd ? 'bg-indigo-950 text-indigo-300 border border-indigo-800/50' : 'bg-cyan-950 text-cyan-300 border border-cyan-800/50'}">
+                                    ${task.task_type || 'task'}
+                                </span>
+                                <span class="text-slate-500 text-[11px] font-mono">${task.created_at || 'Just now'}</span>
+                            </div>
+                            <p class="text-xs text-slate-200 font-medium line-clamp-2">${escapeHtml(task.prompt)}</p>
+                            ${task.proposed_command ? `<div class="bg-slate-900 px-2.5 py-1.5 rounded font-mono text-[11px] text-indigo-300 border border-slate-800 overflow-x-auto">$ ${escapeHtml(task.proposed_command)}</div>` : ''}
+                            ${riskBadge ? `<div class="pt-1 flex justify-end">${riskBadge}</div>` : ''}
+                        </div>
+                    `;
+                }).join('');
+
+            } catch (err) {
+                listEl.innerHTML = `
+                    <div class="p-4 bg-rose-950/20 border border-rose-900/50 rounded-xl text-xs text-rose-300 text-center">
+                        Unable to load history from <code class="font-mono text-rose-200">/api/tasks</code>
+                    </div>
+                `;
+            }
+        }
+
+        function getRiskBadge(level) {
+            switch(level) {
+                case 'CRITICAL':
+                    return `<span class="text-[10px] px-2 py-0.5 rounded bg-rose-950/80 text-rose-400 border border-rose-800/60 font-semibold">CRITICAL</span>`;
+                case 'HIGH':
+                    return `<span class="text-[10px] px-2 py-0.5 rounded bg-amber-950/80 text-amber-400 border border-amber-800/60 font-semibold">HIGH</span>`;
+                default:
+                    return `<span class="text-[10px] px-2 py-0.5 rounded bg-emerald-950/80 text-emerald-400 border border-emerald-800/60 font-semibold">SAFE</span>`;
+            }
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            return text.replace(/[&<>"']/g, function(m) {
+                return {
+                    '&': '&amp;',
+                    '<': '&lt;',
+                    '>': '&gt;',
+                    '"': '&quot;',
+                    "'": '&#039;'
+                }[m];
+            });
+        }
+
+        // Init on load
+        window.onload = function() {
+            updateJsonPreview();
+            fetchTaskHistory();
+        };
+    </script>
+</body>
+</html>

@@ -75,7 +75,7 @@ pub async fn init_db() -> Result<SqlitePool, Box<dyn std::error::Error>> {
     println!("Database initialized successfully at data/pipeline.db!");
     Ok(pool)
 }
-
+#[allow(dead_code)]
 // 1, Save incoming email payload
 pub async fn insert_payload(
     pool: &SqlitePool,
@@ -96,7 +96,7 @@ pub async fn insert_payload(
 
     Ok(())
 }
-
+#[allow(dead_code)]
 // 2. Track pipeline run status
 pub async fn create_pipeline_run(
     pool: &SqlitePool,
@@ -113,7 +113,7 @@ pub async fn create_pipeline_run(
 
     Ok(())
 }
-
+#[allow(dead_code)]
 pub async fn mark_pipeline_complete(pool: &SqlitePool, run_id: &str) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"
@@ -128,7 +128,7 @@ pub async fn mark_pipeline_complete(pool: &SqlitePool, run_id: &str) -> Result<(
 
     Ok(())
 }
-
+#[allow(dead_code)]
 // 3. Save Ollama output
 pub async fn save_llm_output(
     pool: &SqlitePool,

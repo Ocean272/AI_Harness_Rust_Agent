@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+ 
     <title>Rust-Agent Control Plane</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
@@ -11,9 +12,43 @@
         color: #f8fafc;
         font-family: monospace;
         }
+        /* Base scrollbar size for all custom-scrollbar elements */
+        .custom-scrollbar::-webkit-scrollbar {
+        height: 4px !important;
+        width: 4px !important;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-track {
+        background: rgba(15, 23, 42, 0.6) !important;
+        border-radius: 9999px;
+        }
+
+        /* Default Slate Thumb */
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+        background: #475569 !important;
+        border-radius: 9999px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+        background: #64748b !important;
+        }
+
+        /* Amber Variant Override */
+        .amber-scrollbar::-webkit-scrollbar-thumb {
+        background: #d97706 !important;
+        border-radius: 9999px;
+        }
+
+        .amber-scrollbar::-webkit-scrollbar-thumb:hover {
+        background: #f59e0b !important;
+        }
     </style>
 </head>
 <body class="p-6">
+       
+    <a href="/submit" class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-500 transition">
+        + Submit New Task
+    </a>
     <div class="max-w-7xl mx-auto space-y-6">
         <!-- Header -->
         <div class="flex justify-between item-center border-b border-slate-700 pb-4">
@@ -62,7 +97,7 @@
             >
             ▲ Active HITL Approval Queue
             </h2>
-            <div id="hitl-queue" class="space-y-3">
+            <div id="hitl-queue" class="space-y-3 max-h-[300px] overflow-y-auto pr-1">
                 <p class="text-slate-500 text-xs italic">
                     No tasks currently awaiting approval.
                 </p>
@@ -76,8 +111,8 @@
             >
             Historical Task Audit Log
             </h2>
-            <div class="overflow-x-auto">
-                <table class-="w-full text-left text-sm text-slate-300 table-fixed">
+            <div class="max-h-[400px] overflow-y-auto overflow-x-auto pr-1">
+                <table class-="w-full min-w-[900px] text-left text-sm text-slate-300 table-fixed">
                     <thread class="bg-slate-800/50 text-slate-400 uppercase text-xs font-semibold">
                         <tr>
                             <th class="py-3 px-4 w-1/6">Task ID</th>
@@ -173,12 +208,21 @@
                 document.getElementById('audit-table').innerHTML = currentTasks.map(t => {
                     const taskId = t.task_id || t.id;
                     return `
-                        <tr class="hover:bg-slate-800/30 transition">
+                        <tr class="hover:bg-slate-800/30 transition border-b border-slate-800">
                             <td class="py-3 px-4 font-mono text-xs text-slate-400 truncate">${t.id}</td>
-                            <td class="py-3 px-4 text-slate-200 font-medium truncate">${t.prompt || 'N/A'}</td>
-                            <td class="py-3 px-4 font-mono text-xs text-amber-400/90 truncate">$ ${t.proposed_command}</td>
+                            <td class="py-3 px-4 max-w-[220px]">
+                                <div class="overflow-x-auto whitespace-nowrap text-slate-200 font-medium custom-scrollbar pb-1">
+                                    ${t.prompt || 'N/A'}
+                                </div>
+                            </td>
+
+                            <td class="py-3 px-4 max-w-[260px]">
+                                <div class="overflow-x-auto whitespace-nowrap font-mono text-xs text-amber-400 custom-scrollbar amber-scrollbar pb-1">
+                                    $ ${t.proposed_command}
+                                </div>
+                            </td>
                             <td class="py-3 px-4">
-                            <span class="px-2 py-0.5 text-xs font-semibold rounded bg-slate-800 text-slate-300 border border-slate-700">${t.risk_level}</span>
+                            <span class=px-2 py-0.5 text-xs font-semibold rounded bg-slate-800 text-slate-300 border border-slate-700">${t.risk_level}</span>
                             </td>
                             <td class="py-3 px-4">
                             <span class="px-2 py-0.5 text-xs font-semibold rounded ${getStatusStyle(t.status)}">${t.status}</span>
@@ -227,18 +271,16 @@
         }
 
         function openDrawer(taskId) {
-            const tasks = window.currentTasks || [];
-            const task = tasks.find(t => (t.task_id || t.id) === taskId);
-            if (!task) {
-                console.warn("Task not found in currentTasks:", taskId);
-                return;
-            }
+            const task = currentTasks.find(t => (t.task_id || t.id) === taskId);
+            if (!task) return;
 
-            // Get the ID value from whichever field exists
-            const idValue = task.task_id || task.id;
-
-            document.getElementById('drawer-task-id').innerText = `#${idValue}`;
-            document.getElementById('drawer-stdout').innerText = task.stdout || 'No output recorded.';
+            document.getElementById('drawer-task-id').innerText = `#${task.task_id || task.id}`;
+            
+            // Display explicit success confirmation if executed but stdout was silent
+            const stdoutText = task.stdout && task.stdout.trim() !== ''
+                ? task.stdout
+                : (task.status === 'EXECUTED' ? '[Process exit with code 0 - No output produced]' : 'No output recorded.');
+            document.getElementById('drawer-stdout').innerText = stdoutText;
             document.getElementById('drawer-stderr').innerText = task.stderr || 'No errors recorded.';
 
             // Show drawer overlay

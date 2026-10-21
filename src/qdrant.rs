@@ -1,7 +1,7 @@
 use anyhow::Result;
 use qdrant_client::qdrant::{
     vectors_config::Config, CreateCollection, Distance, PointStruct, SearchPointsBuilder,
-    UpsertPointsBuilder, VectorParams, VectorsConfig,
+    UpsertPointsBuilder, VectorParams, VectorsConfig, Condition, Filter
 };
 use qdrant_client::Qdrant;
 use serde::{Deserialize, Serialize};
@@ -123,38 +123,81 @@ impl QdrantService {
         Ok(())
     }
 
-    pub async fn search(&self, vector: Vec<f32>, limit: u64) -> Result<Vec<String>> {
+    pub async fn search(&self, vector: Vec<f32>, _limit: u64) -> Result<Vec<String>> {
         let search_result = self
             .client
             .search_points(
-                SearchPointsBuilder::new(&self.collection_name, vector, limit).with_payload(true),
+                SearchPointsBuilder::new(&self.collection_name, vector, 20)
+                    .with_payload(true)
+                    .filter(Filter {
+                        must_not: vec![Condition::matches("command", "DIRECT_ANSWER".to_string())],
+                        ..Default::default()
+                    }),
             )
             .await?;
 
+        // for hit in &search_result.result {
+        //     println!("[DEBUG SEARCH] Hit payload: {:?}", hit.payload)
+        // }
+
+        let mut hits = search_result.result;
+        hits.sort_by(|a, b| {
+            let cmd_a = a.payload.get("command").and_then(|v| v.as_str()).map_or("", |v| v);
+            let cmd_b = b.payload.get("command").and_then(|v| v.as_str()).map_or("", |v| v);
+
+            let is_memory_a = if cmd_a == "MEMORY_INGEST" { 1 } else { 0 };
+            let is_memory_b = if cmd_b == "MEMORY_INGEST" { 1 } else { 0 };
+
+            if is_memory_a != is_memory_b {
+                is_memory_b.cmp(&is_memory_a)
+            } else {
+                let time_a = a.payload.get("ingested_at").and_then(|v| v.as_str()).map_or("", |v| v);       
+                let time_b = b.payload.get("ingested_at").and_then(|v| v.as_str()).map_or("", |v| v);
+                time_b.cmp(time_a)  
+            }
+        });
+
         let mut docs = Vec::new();
-        for hit in search_result.result {
-            let payload = hit.payload;
+        for hit in &hits {
+            if hit.score > 0.4 {
+                let payload = &hit.payload;
 
-            // Try extracting structed task execution payload
-            let command = payload.get("command").and_then(|v| v.as_str());
-            let stdout = payload.get("stdout").and_then(|v| v.as_str());
-            let stderr = payload.get("stderr").and_then(|v| v.as_str());
-            let prompt = payload.get("prompt").and_then(|v| v.as_str());
+                // Try extracting structed task execution payload
+                let command = payload.get("command").and_then(|v| v.as_str());
+                if let Some(cmd) = command {
+                    if cmd == "DIRECT_ANSWER" {
+                        continue;
+                    }
 
-            if command.is_some() || stdout.is_some() || stderr.is_some() {
-                let snippet = format!(
-                    "Prompt: {}\nCommand: {}\nStdout: {}\nStderr: {}",
-                    prompt.map_or("N/A", |v| v),
-                    command.map_or("N/A", |v| v),
-                    stdout.map_or("", |v| v),
-                    stderr.map_or("", |v| v),
-                );
-                docs.push(snippet);
-            } else if let Some(payload_val) = payload.get("content") {
-                if let Some(str_val) = payload_val.as_str() {
-                    docs.push(str_val.to_string());
-                } else {
-                    docs.push(payload_val.to_string());
+                    if cmd == "MEMORY_INGEST" {
+                        // Format clean memory ingest payloads without empty command/stdout blocks
+                        if let Some(content) = payload.get("content").and_then(|v| v.as_str()) {
+                            docs.push(format!("Memory Ingest: {}",content));
+                        } else if let Some(prompt) = payload.get("prompt").and_then(|v| v.as_str()) {
+                            docs.push(format!("Memory Ingest: {}", prompt));
+                        }
+                        continue;
+                    }
+                }
+
+                let stdout = payload.get("stdout").and_then(|v| v.as_str());
+                let stderr = payload.get("stderr").and_then(|v| v.as_str());
+                let prompt = payload.get("prompt").and_then(|v| v.as_str());
+
+                if command.is_some() || stdout.is_some() || stderr.is_some() {
+                    let snippet = format!(
+                        "Prompt: {}\nCommand: {}\nStdout: {}\nStderr: {}",
+                        prompt.map_or("N/A", |v| v),
+                        command.map_or("N/A", |v| v),
+                        stdout.map_or("", |v| v),
+                        stderr.map_or("", |v| v),
+                    );
+                    docs.push(snippet);
+                } else if let Some(payload_val) = payload.get("content") {
+                    let str_val = payload_val.as_str()
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| payload_val.to_string());
+                    docs.push(str_val);
                 }
             }
         }
@@ -184,10 +227,12 @@ impl QdrantService {
         stderr: &str,
         status: &str,
     ) -> Result<()> {
+
+        let timestamp = chrono::Utc::now().to_rfc3339();
         // Build a rich textual summary representing the execution memory
         let memory_text = format!(
-            "Task ID: {}\nPrompt: {}\nCommand executed: {}\nStatus: {}\n Stdout: {}\n Stderr: {}",
-            task_id, prompt, command, status, stdout, stderr
+            "Timestamp: {}\nTask ID: {}\nPrompt: {}\nCommand executed: {}\nStatus: {}\n Stdout: {}\n Stderr: {}",
+            timestamp, task_id, prompt, command, status, stdout, stderr
         );
 
         // Generate vector embedding for this execution log using Ollama
@@ -219,6 +264,10 @@ impl QdrantService {
             "stderr".to_string(),
             qdrant_client::qdrant::Value::from(stderr),
         );
+        payload_map.insert(
+            "ingested_at".to_string(),
+            qdrant_client::qdrant::Value::from(chrono::Utc::now().to_rfc3339()),
+        );
 
         // Create point using task_id (or hashed ID)
         let point_id = uuid::Uuid::parse_str(task_id)
@@ -239,6 +288,7 @@ impl QdrantService {
     pub async fn get_embedding(&self, text: &str) -> Result<Vec<f32>> {
         generate_ollama_embedding(&self.http_client, text).await
     }
+    #[allow(dead_code)]
 
     pub async fn search_by_text(&self, text: &str, limit: u64) -> Result<Vec<String>> {
         let vector = self.get_embedding(text).await?;

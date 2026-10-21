@@ -2,6 +2,7 @@ use rig::tool::Tool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 // use std::collections::HashSet;
+use crate::services::{sanitizer, executor};
 
 // define the input arguments the LLM will provide
 #[derive(Deserialize, JsonSchema, Debug)]
@@ -17,6 +18,7 @@ pub struct SecurityReport {
     pub risk_level: String,
     pub detected_flags: Vec<String>,
     pub sanitized_command: String,
+    pub execution_output: String,
 }
 
 pub struct SecurityValidatorTool;
@@ -72,6 +74,9 @@ impl Tool for SecurityValidatorTool {
             "/etc/shadow",
             "/etc/passwd",
             "/etc/secret",
+            "systemctl",
+            "service",
+            "docker",
         ];
 
         for token in structural_blocklist {
@@ -104,6 +109,31 @@ impl Tool for SecurityValidatorTool {
             risk_level = "HIGH".to_string();
         }
 
+        // Scrub sensitive tokens/secrets using the sanitizer service
+        let scrubbed_cmd = sanitizer::sanitize(cleaned_cmd);
+
+        // Sandbox Execution Evaluation
+        let mut exec_output = String::new();
+        if safe_to_execute {
+            // Split binary and args safely for direct execution
+            let parts: Vec<&str> = scrubbed_cmd.split_whitespace().collect();
+            if !parts.is_empty() {
+                let program = parts[0];
+                let args_slice = &parts[1..];
+
+                match executor::run_sandboxed_command(program, args_slice, 5).await {
+                    Ok(res) => {
+                        exec_output = format!("Exit Code {:?}: {}", res.exit_code, res.stdout);
+                    }
+                    Err(e) => {
+                        exec_output = format!("Sandbox Error: {}", e);
+                    }
+                }
+            }
+        } else {
+            exec_output = "Execution blocked due to security flags.".to_string();
+        }
+
         // Compile the report
         let report = SecurityReport {
             safe_to_execute,
@@ -114,6 +144,7 @@ impl Tool for SecurityValidatorTool {
                 detected_flags
             },
             sanitized_command: cleaned_cmd.to_string(),
+            execution_output: exec_output,
         };
 
         // Serialize the report back to Rig
