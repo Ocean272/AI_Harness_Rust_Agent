@@ -1,169 +1,177 @@
-# Rust-Agent :: Hybrid Autonomous Infrastructure Control Plane
+# Rust Agent (Local AI & Infrastructure Service)
 
-A production-grade, event-driven autonomous AI agent harness built in Rust. Designed to run on Proxmox VE LXC container nodes, `rust-agent` monitors internal infrastructure event streams (IMAP email, filesystem events, scheduled cron tasks), enforces security isolation, manages vector memory via Qdrant, and executes system tasks with an intelligent local-to-cloud LLM failover strategy.
-
----
-
-## Architecture Overview
-
-```text
-                                  +---------------------------------------+
-                                  |         Event Ingestion Layer         |
-                                  |  - IMAP Listener (docker-mailserver)  |
-                                  |  - File System Watcher                |
-                                  |  - Cron Scheduler                     |
-                                  +-------------------+-------------------+
-                                                      |
-                                                      v
-+---------------------------------+       +-----------+-----------+
-|      Gemini Cloud Fallback      |<------|  Saturation Monitor   |
-| (Secondary model / High Context)| >88%  | (>88% Threshold Check)|
-+---------------------------------+       +-----------+-----------+
-                                                      | <=88%
-                                                      v
-                                          +-----------+------------+
-                                          |Local Inference Engine  |
-                                          | (Ollama / Local LLM)   |
-                                          +-----------+------------+
-                                                      |
-                                                      v
-                                        +-------------+-------------+
-                                        |  Security Gateway / Rules |
-                                        |    (Sanitizer & HITL)     |
-                                        +-------------+-------------+
-                                                      |
-                                                      v
-                                        +-------------+-------------+
-                                        |     Execution Engine      |
-                                        | (Terminal Tools / Actions)|
-                                        +-------------+-------------+
-                                                      |
-                                                      v
-                                          +-----------+-----------+
-                                          |  Vector RAG Ingestion |
-                                          |   (Qdrant Vector DB)  |
-                                          +-----------------------+
-
-```
+A high-performance, local-first Rust autonomous agent service built on **Axum**, **Qdrant**, **Ollama**, and **Docker**. The system combines vector memory retrieval (RAG), background listeners, custom micro-GPT transformer mechanisms, a Human-in-the-Loop (HITL) approval workflow, and an isolated Docker execution sandbox.
 
 ---
 
-## Core Capabilities
+## 🌟 Key Features
 
-* **Hybrid Local/Cloud Intelligence:** Prioritizes privacy and speed using local LLMs (via Ollama) for routine tasks. Automatically escalates payloads that breach resource/context limits (>88% saturation) to Gemini cloud models.
-
-* **Event-Driven Listeners:** Continuous background monitoring for new tasks via IMAP mailbox polling, local directory file modifications, and scheduled cron jobs.
-
-* **Security Gateway & HITL Control:** Inspects all proposed commands for dangerous operations (e.g., destructive system flags, unauthorized file modifications). High-risk operations are held in a Human-in-the-Loop (HITL) approval queue before execution.
-
-* **Episodic Vector Memory (RAG):** Automatically embeds task prompts, execution outputs, and status logs into Qdrant for semantic search and context retrieval across runs.
-
-* **Control Plane Web Interface:** Built-in web dashboard served via embedded static assets (`index.html`) providing a real-time audit log, active HITL queue management, and task status metrics.
+* **Modular Crate Architecture**: Clean separation across `handlers/`, `listeners/`, `monitor/`, `services/`, and `tools/` modules.
+* **Vector Memory & RAG Integration**: Semantic search and memory ingestion backed by Qdrant vector storage (`qdrant.rs`, `rag.rs`).
+* **In-House Transformer & GPT Engine**: Lightweight local inference and causal self-attention modules (`attention.rs`, `micro_gpt.rs`).
+* **Human-In-The-Loop (HITL) Gatekeeper**: Intercepts high-risk or infrastructure-modifying commands into a persistent SQLite task queue (`db.rs`) awaiting manual approval.
+* **Docker Sandboxed Execution**: Runs system-level commands inside ephemeral, network-isolated (`--network none`) Alpine containers for safe host execution (`executor.rs`, `sanitizer.rs`).
+* **Multi-Channel Listeners**: Integrated automated background listeners for Cron, IMAP email triggers, and file system watchers (`listeners/`).
+* **Web UI Dashboards**: Embedded HTML frontend (`static/index.html`, `search.html`, `submit.html`) for task submission, monitoring, and vector memory retrieval.
 
 ---
 
-## Repository Structure
+## 🏗️ System Architecture
+                                 ┌──────────────────────────────┐
+                                 │       Axum Web Server        │
+                                 │  (static/ & REST API Routes) │
+                                 └──────────────┬───────────────┘
+                                                │
+         ┌──────────────────────────────────────┼───────────────────────────────────┐
+         ▼                                      ▼                                   ▼
+┌─────────────────────────┐       ┌──────────────────────────┐         ┌─────────────────────────┐
+│     Vector RAG & AI     │       │   HITL & Storage Engine  │         │   Background Watchers   │
+│ (Qdrant, attention.rs,  │       │(db.rs SQLite Persistence,│         │  (File Watcher, IMAP,   │
+│  micro_gpt.rs, Ollama)  │       │   security.rs Filter)    │         │       Cron, Cloud)      │
+└─────────────────────────┘       └─────────────┬────────────┘         └─────────────────────────┘
+                                                │
+                                    [ Is High-Risk Command? ]
+                                            /       \
+                                           /         \
+                                         Yes          No
+                                        /               \
+                                       /                 \
+                            ┌─────────┴───────┐     ┌─────┴─────────────────────┐
+                            │ Pending Queue   │     │ Docker Execution Sandbox  │
+                            │ (Awaits HITL)   │     │ (alpine, --network none)  │
+                            └─────────────────┘     └───────────────────────────┘
+
+---
+
+## 📁 Repository Structure
 
 ```text
 rust-agent/
+├── .cargo/
+├── .github/
+├── data/
+├── inbox/
+├── models/
 ├── src/
-│   ├── listeners/          # Async event watchers
-│   │   ├── file_watcher.rs # Filesystem event monitoring
-│   │   ├── imap.rs         # IMAP mail listener & payload dispatcher
+│   ├── handlers/            # Axum request handlers
+│   │   ├── command.rs       # Task submission and execution handlers
+│   │   ├── mod.rs           # Module exports
+│   │   └── rag.rs           # Vector memory query handlers
+│   ├── inbox/               # Ingested email trigger payload directory
+│   ├── listeners/           # Automated event listeners
+│   │   ├── file_watcher.rs  # Directory watcher listener
+│   │   ├── imap.rs          # Email inbox listener
 │   │   └── mod.rs
-│   ├── monitor/            # Resource & context tracking
-│   │   ├── cloud.rs        # Gemini API fallback client
-│   │   ├── embedded.rs     # Local model integration
-│   │   └── mod.rs          # Saturation calculation logic
-│   ├── services/           # Orchestration & execution core
-│   │   ├── cron.rs         # Scheduled task triggers
-│   │   ├── executor.rs     # Async task dispatch & command execution
-│   │   ├── sanitizer.rs    # Shell command security validation
+│   ├── monitor/             # System and node monitoring
+│   │   ├── cloud.rs         # Remote/Cloud health monitor
+│   │   ├── embedded.rs      # Local embedded monitor
 │   │   └── mod.rs
-│   ├── tools/              # Action integration modules
-│   │   ├── email.rs        # Email parser & payload builder
-│   │   ├── qdrant_tools.rs # Vector search & point manipulation
-│   │   ├── security.rs     # Command risk scoring logic
-│   │   ├── terminal.rs     # Shell tool execution interface
-│   │   └── mod.rs
-│   ├── api.rs              # REST API endpoints for Web UI & triggers
-│   ├── db.rs               # Local state & task store management
-│   ├── lib.rs              # Core module bindings
-│   ├── main.rs             # Application entry point & service wiring
-│   └── qdrant.rs           # Qdrant client connection & collection setup
-├── static/
-│   └── index.html          # Hybrid Control Plane dashboard UI
-├── .env                    # Environment configuration
-├── Cargo.toml              # Rust crate dependencies
-└── Cargo.lock
+│   ├── services/            # Core agent logic and sandbox services
+│   │   ├── agent.rs         # Main orchestration agent logic
+│   │   ├── bootstrap.rs     # Background worker initialization
+│   │   ├── cron.rs          # Scheduled cron service
+│   │   ├── executor.rs      # Command execution engine
+│   │   ├── micro_gpt.rs     # Transformer model handler
+│   │   ├── mod.rs
+│   │   ├── model.rs         # Model states & domain entities
+│   │   └── sanitizer.rs     # Input cleaning & command parsing
+│   ├── tools/               # Agent tool implementations
+│   │   ├── email.rs         # Email sending/parsing tools
+│   │   ├── mod.rs
+│   │   ├── qdrant_tools.rs  # Vector database utilities
+│   │   ├── security.rs      # Command blocklist & security checks
+│   │   └── terminal.rs      # Shell terminal interaction tools
+│   ├── api.rs               # Axum AppState and router configuration
+│   ├── attention.rs         # Causal self-attention & tensor logic
+│   ├── db.rs                # SQLite database persistence layer
+│   ├── lib.rs               # Crate root module declarations
+│   ├── main.rs              # Application entrypoint
+│   └── qdrant.rs            # Qdrant client vector database service
+├── static/                  # Static Web UI frontend
+│   ├── index.html           # Main monitoring dashboard
+│   ├── search.html          # Vector memory search view
+│   └── submit.html          # Task submission interface
+├── .env                     # Local environment configuration
+├── .gitignore
+├── Cargo.lock
+├── Cargo.toml               # Crate dependencies
+├── load_test.sh             # API load testing script
+└── readme.md                # Project documentation
 
-```
 
----
 
-## Key Modules Breakdown
+🛡️ Sandbox Execution & Safety
 
-| Module / Directory | Responsibility |
-| --- | --- |
-| **`listeners/`** | Manages asynchronous ingestion sources. `imap.rs` logs into the mail      server, checks for unseen emails, and dispatches new task payloads to the core API. |
-| **`monitor/`** | Evaluates payload size and context saturation. Routes normal requests to local models (`embedded.rs`) and over-capacity requests to cloud LLMs (`cloud.rs`). |
-| **`services/`** | Handles pipeline mechanics. `sanitizer.rs` screens commands against security policies, while `executor.rs` manages shell invocation and HITL pauses. |
-| **`tools/`** | Defines functions exposed to the LLM agent, including command execution (`terminal.rs`), email processing (`email.rs`), and vector memory operations (`qdrant_tools.rs`). |
-| **`api.rs` & `static/**` | Houses the HTTP server and UI endpoints used to render the task audit log, present execution telemetry, and allow manual HITL command approvals. |
+To keep host hypervisors safe, all executed terminal commands pass through two security layers:
 
----
+1. Security Command Filter (tools/security.rs): High-privilege or dangerous commands are flagged and held in SQLite (db.rs) for human review.
 
-## Environment Configuration (`.env`)
+2. Container Isolation (services/executor.rs): Approved shell executions run within an isolated Docker container:
+* Network Isolation: Spun up with --network none to prevent unintended network access.
+* Ephemeral Lifecycle: Launched with --rm to automatically destroy container state upon exit.
+* Output Interception: stdout and stderr are clean-wrapped and logged back into the task trace.
 
-Create a `.env` file in the root directory prior to running:
 
-```env
-# Server Setup
-PORT=8080
-RUST_LOG=info
 
-# Local Mail Server (docker-mailserver)
-IMAP_SERVER=192.168.0.x
-IMAP_PORT=143
-IMAP_USER=agent@sandbox.local
-IMAP_PASS=your_secure_password
+🚀 Getting Started
 
-# Vector Database (Qdrant)
-QDRANT_URL=http://192.168.0.x:6333
-QDRANT_COLLECTION=emails
+Prerequisites
+- Rust (1.75+ recommended)
+- Docker Engine (running local daemon)
+- Qdrant Vector DB (running on port 6333 / 6334)
+- Ollama (for local embedding model inference)
 
-# Cloud Fallback (Gemini)
-GEMINI_API_KEY=your_gemini_api_key
+Building & Execution
+- Clone the repository:
 
-```
+Bash
 
----
-
-## Getting Started
-
-### Prerequisites
-
-* **Rust:** Nightly or latest Stable toolchain (`cargo`, `rustc`)
-* **Qdrant:** Active instance reachable via network or container
-* **Ollama:** Running locally with target models loaded
-* **Mail Server:** Active IMAP service accessible on network
-
-### Build and Run
-
-1. Clone the repository to your host or LXC container:
-```bash
-git clone https://github.com/your-username/rust-agent.git
+git clone [https://github.com/your-username/rust-agent.git](https://github.com/your-username/rust-agent.git)
 cd rust-agent
 
-```
 
+Configure Environment:
+Ensure .env contains your database and endpoint settings:Code snippetDATABASE_URL=sqlite://tasks.db
+QDRANT_URL=http://localhost:6334
+OLLAMA_URL=http://localhost:11434
+RUST_LOG=info
 
-2. Compile and run in development mode:
-```bash
+Check & Compile:
+Bash
+
+# Verify crate visibility across lib and bin targets
+cargo check --all-targets
+
+# Build and launch agent service
 cargo run
 
-```
 
 
-3. Access the Control Plane Dashboard:
-Navigate to `http://<NODE_IP>:8080` in your web browser.
+📡 API Endpoints
+
+Method              Route                           Description
+GE                  /                               Serves main Dashboard UI (index.html)
+GET                 /search                         Serves Vector Search UI (search.html)
+GET                 /submit                         Serves Task Submission UI (submit.html)
+POST                /api/memory/search              Queries Qdrant vector memory snippets (RAG)
+POST                /api/v1/agent/task              Submits a command or agent task
+GET                 /api/v1/tasks/pending           Retrieves held HITL approval tasks
+POST                /api/v1/tasks/:task_id/approve  Approves and executes a pending task
+POST                /api/ingest                     Ingests new text memory into Qdrant
+
+
+
+🧪 Testing
+Run automated load tests and unit test suites:
+Bash
+
+# Run Rust unit tests
+cargo test
+
+# Run HTTP route load tests
+bash 
+load_test.sh
+
+
+📄 License
+Distributed under the MIT License.
