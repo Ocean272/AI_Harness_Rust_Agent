@@ -83,7 +83,7 @@ pub async fn handle_task_submission(
                     message: stdout_msg,
                     task_id: Some(task_id),
                     risk_level: Some("SAFE".to_string()),
-                }));
+                }))
             }
             // Standard RAG Query Flow (Ollama Inference Pipeline)
             // Fetch RAG context from Qdrant
@@ -127,7 +127,7 @@ pub async fn handle_task_submission(
                         }
                     }
                     // Return cloud response if successful, otherwise fall back to empty/error string
-                    cloud_res.unwrap_or_else(|| "Failed to escalate to cloud model.".to_string())
+                    cloud_res.unwrap_or("Failed to escalate to cloud model.".to_string())
                 }
                 SafetyAction::PruneContext => {
                     eprintln!("[Monitor Warning]: Context saturation moderate (>75%). Pruning context...");
@@ -194,12 +194,12 @@ pub async fn handle_task_submission(
                 status,
             ).await;
 
-            return Ok(Json(TaskResponse {
+            Ok(Json(TaskResponse {
                 status: status.to_string(),
                 message: ollama_answer,
                 task_id: Some(task_id),
                 risk_level: Some("SAFE".to_string()),
-            }));
+            }))
         }
         TaskType::Command => {
             let mut risk_level = "LOW".to_string();
@@ -264,7 +264,7 @@ pub async fn handle_task_submission(
                 message: format!("Command '{}' executed successfully.", proposed_command),
                 task_id: Some(task_id),
                 risk_level: Some(risk_level),
-            }));
+            }))
         }
-    };
+    }
 }

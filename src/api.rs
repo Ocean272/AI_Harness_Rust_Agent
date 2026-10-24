@@ -11,6 +11,20 @@ use sqlx::SqlitePool;
 use std::sync::{Arc, Mutex};
 use crate::services::sanitizer;
 use crate::monitor::{GeminiCloudClient, AgentMonitor, ExecutionTrace};
+use crate::tools::mask_ip_or_url;
+
+#[derive(Deserialize, Serialize)]
+pub struct ChatPayload {
+    pub model: String,
+    pub messages: Vec<ChatMessage>,
+    pub stream: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ChatMessage {
+    pub role: String,
+    pub content: String,
+}
 
 #[derive(serde::Deserialize)]
 pub struct IngestPayload { 
@@ -77,31 +91,31 @@ impl ApprovalPayload {
     }
 }
 
-// pub async fn query_vector_memory_handler(
-//     State(state): State<AppState>,
-//     Json(payload): Json<VectorSearchQueryRequest>,
-// ) -> Result<Json<VectorSearchQueryResponse>, StatusCode> {
-//     // Generate embedding vector for the prompt (using your embedding service / Ollama pipeline)
-//     let query_vector = match state.qdrant_service.get_embedding(&payload.prompt).await {
-//         Ok(vector) => vector,
-//         Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
-//     };
+pub async fn proxy_ollama_chat(
+    Json(payload): Json<ChatPayload>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let ollama_host = std::env::var("OLLAMA_API_BASE_URL")
+        .unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
+    println!(
+        "[Initialization] Connecting to Ollama Brain at: {}",
+        mask_ip_or_url(&ollama_host)
+    );
 
-//     // Determine limit (default to 20 or user-specific)
-//     let limit = payload.limit.unwrap_or(20);
+    let chat_endpoint = format!("{}/api/chat", ollama_host.trim_end_matches('/'));
 
-//     // Call Qdrant Service search method (matching your qdrant.rs signature)
-//     let search_results = state
-//         .qdrant_service
-//         .search(query_vector, limit)
-//         .await
-//         .unwrap_or_default();
+    let client = reqwest::Client::new();
+    let res = client.post(&chat_endpoint)
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-//     Ok(Json(VectorSearchQueryResponse {
-//         status: "success".to_string(),
-//         results: search_results,
-//     }))
-// }
+    Ok(Json(res))
+
+}
 
 pub async fn get_task_history(
     State(state): State<AppState>,
@@ -195,18 +209,6 @@ pub async fn execute_and_record_task(
 }
 
 
-async fn serve_dashboard() -> Html<&'static str> {
-    Html(include_str!("../static/index.html"))
-}
-
-async fn serve_submit() -> Html<&'static str> {
-    Html(include_str!("../static/submit.html"))
-}
-
-async fn serve_search_page() -> Html<&'static str> {
-    Html(include_str!("../static/search.html"))
-}
-
 //  Fetch all pending tasks awaiting approval
 async fn get_pending_tasks(State(state): State<AppState>) -> Json<Vec<PendingTask>> {
     let queue = state.pending_tasks.lock().unwrap();
@@ -228,11 +230,9 @@ pub async fn approve_task(
     let task_from_memory = {
         let mut queue = state.pending_tasks.lock().unwrap();
 
-        if let Some(index) = queue.iter().position(|t| t.task_id == task_id) {
-            Some(queue.remove(index).proposed_command)
-        } else {
-            None
-        }
+        queue.iter().position(|t| t.task_id == task_id) 
+            .map(|index| queue.remove(index).proposed_command)
+ 
     };
 
     let record = sqlx::query("SELECT proposed_command FROM tasks WHERE id = ?")
@@ -366,6 +366,22 @@ pub async fn ingest_memory_handler(
     }
 }
 
+async fn serve_dashboard() -> Html<&'static str> {
+    Html(include_str!("../static/index.html"))
+}
+
+async fn serve_submit() -> Html<&'static str> {
+    Html(include_str!("../static/submit.html"))
+}
+
+async fn serve_search_page() -> Html<&'static str> {
+    Html(include_str!("../static/search.html"))
+}
+
+async fn serve_tools_page() -> Html<&'static str> {
+    Html(include_str!("../static/tools.html"))
+}
+
 // Initialize Axum Router
 pub fn create_router(app_state: AppState) -> Router {
     Router::new()
@@ -385,6 +401,8 @@ pub fn create_router(app_state: AppState) -> Router {
         .route("/api/tasks/:id/respond", post(approve_task))
         .route("/api/memory/search", post(crate::handlers::rag::query_vector_memory_handler))
         .route("/search", get(serve_search_page))
+        .route("/tools", get(serve_tools_page))
+        .route("/api/chat", post(proxy_ollama_chat))
         .with_state(app_state)
 }
 

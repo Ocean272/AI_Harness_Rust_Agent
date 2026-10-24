@@ -1,299 +1,249 @@
 <!doctype html>
-<html lang="en">
-<head>
+<html lang="en" class="h-full bg-[#0d1117] text-[#c9d1d9]">
+  <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
- 
-    <title>Rust-Agent Control Plane</title>
+    <title>Local AI Agent Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        body {
-        background-color: #0f172a;
-        color: #f8fafc;
-        font-family: monospace;
-        }
-        /* Base scrollbar size for all custom-scrollbar elements */
-        .custom-scrollbar::-webkit-scrollbar {
-        height: 4px !important;
-        width: 4px !important;
-        }
+  </head>
+  <body>
+    <!-- TOP NAVIGATION BAR -->
+    <header
+      class="h-14 bg-[#161b22] border-b border-[#30363d] flex items-center justify-between px-4 shrink-0"
+    >
+      <div class="flex items-center space-x-6">
+        <div class="flex items-center space-x-2 font-semibold text-white">
+          <svg
+            class="w-6 h-6 text-[#2ea043]"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M13 10V3L4 14h7v7l9-11h-7z"
+            />
+          </svg>
+          <span>Promxox Local AI</span>
+        </div>
 
-        .custom-scrollbar::-webkit-scrollbar-track {
-        background: rgba(15, 23, 42, 0.6) !important;
-        border-radius: 9999px;
-        }
+        <nav class="flex items-center space-x-1 text-sm">
+          <a
+            href="/"
+            class="px-3 py-1.5 rounded-mg bg-[#21262d] text-white font-medium"
+            >🏠 Chat</a
+          >
+          <a
+            href="/search"
+            class="px-3 py-1.5 rounded-mg text-[#8b949e] hover:text-[#c9d1d9] hover:bg-[#21262d]"
+            >🔍 Qdrant Search</a
+          >
+          <a
+            href="/submit"
+            class="px-3 py-1.5 rounded-mg text-[#8b949e] hover:text-[#c9d1d9] hover:bg-[#21262d]"
+            >📤 Submit Task</a
+          >
+          <a
+            href="/index"
+            class="px-3 py-1.5 rounded-mg text-[#8b949e] hover:text-[#c9d1d9] hover:bg-[#21262d]"
+            >🛠️ Settings</a
+          >
+          <a
+            href="/tools"
+            class="px-3 py-1.5 rounded-mg text-[#8b949e] hover:text-[#c9d1d9] hover:bg-[#21262d]"
+            >⚙️ Control Plane</a
+          >
+        </nav>
+      </div>
 
-        /* Default Slate Thumb */
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-        background: #475569 !important;
-        border-radius: 9999px;
-        }
+      <div class="" flex items-center space-x-3>
+        <span
+          class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-[#238636]/20 text-[#3fb950] border border-[#238636]/40"
+        >
+          <span
+            class="w-1.5 h-1.5 rounded-full bg-[#3fb950] mr-1.5 animate-pulse"
+          ></span>
+          Ollama Connected
+        </span>
+        <button
+          onlick="logout()"
+          class="text-xs text=[#8b949e] hover:text-white px-2 py-1 rounded border border-[#30363d] hover:bg=[#21262d]"
+        >
+          Logout
+        </button>
+      </div>
+    </header>
+    <!-- MAIN WORKSPACE -->
+    <div class="flex-1 flex overflow-hidden">
+      <!-- LEFT SIDEBAR (Controls & Meta)-->
+      <aside
+        class="w-64 bg-[#0d1117] border-r border-[#30363d] p-4 flex flex-col justify-between shrink-0"
+      >
+        <div class="space-y-4">
+          <div>
+            <label
+              class="block text-xs font-semibold text-[#8b949e] uppercase tracking-wider mb-2"
+              >Model</label
+            >
+            <select
+              id="model-select"
+              class="w-full bg-[#161b22] border border-[#30363d] rounded-md px-3 py-2 text-sm text-[#c9d1d9] focus:outline-none focus:border-[#58a6ff]"
+            >
+              <option value="llama3.2:3b">llama3.2:3b</option>
+              <option value="mistral">mistral:latest</option>
+              <option value="codellama">codellama:latest</option>
+            </select>
+          </div>
 
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-        background: #64748b !important;
-        }
-
-        /* Amber Variant Override */
-        .amber-scrollbar::-webkit-scrollbar-thumb {
-        background: #d97706 !important;
-        border-radius: 9999px;
-        }
-
-        .amber-scrollbar::-webkit-scrollbar-thumb:hover {
-        background: #f59e0b !important;
-        }
-    </style>
-</head>
-<body class="p-6">
-       
-    <a href="/submit" class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-500 transition">
-        + Submit New Task
-    </a>
-    <div class="max-w-7xl mx-auto space-y-6">
-        <!-- Header -->
-        <div class="flex justify-between item-center border-b border-slate-700 pb-4">
-            <div>
-                <h1 class="text-2xl font-bold text-sky-400">
-                    RUST-AGENT :: HYBRID CONTROL PLANE
-                </h1>
-                <p class="text-ms text-slate-400">
-                    Proxmox / Docker automomous Infrastucture Harness
-                </p>
-            </div>
-        
+          <div class="" pt-4 border-t border-[#30363d]>
             <span
-            class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-emerald-950 text-emerald-400 border border-emerald-800"
+              class="block text-xs font-semibold text-[#8b949e] uppercase tracking-wider mb-2"
+              >System Status</span
             >
-            ● Node Active
-            </span>
+            <div class="space-y-2 text-xs text-[#8b949e]">
+              <div class="flex justify-between">
+                <span>Inference Node:</span>
+                <span class="text-[#c9d1d9] font-mono">Proxmox-LXC</span>
+              </div>
+              <div class="flex justify-between">
+                <span>Vector DB:</span>
+                <span class="text-[#3fb950]">Qdrant Ready</span>
+              </div>
+              <div class="flex justify-between">
+                <span>Runtime:</span>
+                <span class="text-[#c9d1d9] font-mono">Axum + Rust</span>
+              </div>
+            </div>
+          </div>
         </div>
-
-        <!-- Metrics Overview -->
-        <div class="grid grid-cols-1 md: grid-cols-4 gap-4">
-            <div class="bg-slate-800 p-4 rounded-lg border border-slate-700">
-                <p class="text-slate-400 text-xs">TOTAL TASKS</p>
-                <p id="metric-total" class="text-2xl font-bold text-slate-100">0</p>
-            </div>
-            <div class="bg-slate-800 p-4 rounded-lg border border-slate-700">
-                <p class="text-slate-400 text-xs">AUTO-EXECUTED</p>
-                <p id="metric-executed" class="text-2xl font-bold text-emerald-400">
-                0
-                </p>
-            </div>
-            <div class="bg-slate-800 p-4 rounded-lg border border-slate-700">
-                <p class="text-slate-400 text-xs">PENDING HITL</p>
-                <p id="metric-pending" class="text-2xl font-bold text-amber-400">0</p>
-            </div>
-            <div class="bg-slate-800 p-4 rounded-lg border border-slate-700">
-                <p class="text-slate-400 text-xs">FAILED / REJECTED</p>
-                <p id="metric-failed" class="text-2xl font-bold text-rose-400">0</p>
-            </div>
+        <div
+          class="text-xs text-[#8b949e] text-center border-t broder-[#30363d] pt-3"
+        >
+          Local Stack • Offline
         </div>
+      </aside>
 
-        <!-- HITL Queue Section -->
-        <div class="bg-slate-800 rounded-lg border border-amber-500/30 p-4">
-            <h2
-            class="text-wm font-bold text-amber-400 mb-3 uppercase tracking-wider"
+      <main class="flex-1 flex flex-col bg-[#0d117] overflow-hidden">
+        <!-- Message Window -->
+        <div id="chat-window" class="flex-1 overflow-y-auto p-6 space-y-4">
+          <!-- Assistant Welcome Bubble-->
+          <div class="flex space-x-3 max-2-3xl">
+            <div
+              class="w-8 h-8 rounded-full bg-[#238636] flex items-center justify-center text-white tex-xs font-bold shrink-0"
             >
-            ▲ Active HITL Approval Queue
-            </h2>
-            <div id="hitl-queue" class="space-y-3 max-h-[300px] overflow-y-auto pr-1">
-                <p class="text-slate-500 text-xs italic">
-                    No tasks currently awaiting approval.
-                </p>
+              AI
             </div>
-        </div>
-
-        <!-- Historical Audit Log -->
-        <div class="bg-slate-800 rounded-lg border border-slate-700 p-4">
-            <h2
-            class="text-sm font-bold text-slate-300 mb-3 uppercase tracking-wider"
+            <div
+              class="bg-[#161b22] border border-[#30363d] rounded-lg p-4 text-sm text-[#c9d1d9]"
             >
-            Historical Task Audit Log
-            </h2>
-            <div class="max-h-[400px] overflow-y-auto overflow-x-auto pr-1">
-                <table class-="w-full min-w-[900px] text-left text-sm text-slate-300 table-fixed">
-                    <thread class="bg-slate-800/50 text-slate-400 uppercase text-xs font-semibold">
-                        <tr>
-                            <th class="py-3 px-4 w-1/6">Task ID</th>
-                            <th class="py-3 px-4 w-1/4">Prompt</th>
-                            <th class="py-3 px-4 w-1/4">Proposed Command</th>
-                            <th class="py-3 px-4 w-1/12">Risk</th>
-                            <th class="py-3 px-4 w-1/8">Status</th>
-                            <th class="py-3 px-4 w-1/8 text-right">Action</th>
-                        </tr>
-                    </thread>
-                    <tbody id="audit-table" class="divide-y divide-slate-800">
-                        <!-- Dynamic rows injected here -->
-                    </tbody>
-                </table>
+              <p>Read to assist. Connected to local Ollama runtime.</p>
             </div>
+          </div>
+        </div>
+        <!-- INPUT PANEL -->
+        <div class="p-4 border-t border-[#30363d] bg-[#161b22]">
+          <div class="max-w-4xl mx-auto flex gap-2">
+            <textarea
+              id="user-input"
+              rows="1"
+              placeholder="Type a prompt or instruction for Ollama..."
+              class="flex-1 bg=[#0d1117] border border-[#30363d] rounded-md px-4 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-[#58a6ff] resize-none"
+            ></textarea>
+            <button
+              onclick="sendMessage()"
+              class="bg=[#238636] hover:bg-[#2ea043] text-white px-5 py-2.5 rounded-md font-medium text-sm transition-colors flex items-center justify-center shrink-0"
+            >
+              Send
+            </button>
+          </div>
         </div>
 
-        <!-- Terminal Output Drawer -->
-        <div id="terminal-drawer" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden z-50 flex justify-end transition-opacity">
-            <div class="w-full max-w-xl bg-slate-900 border-l border-slate-800 h-full p-6 flex flex-col justify-between shadow-2xl">
-                <div>
-                <div class="flex items-center justify-between border-b border-slate-800 pb-4 mb-4">
-                    <div>
-                    <h2 class="text-lg font-bold text-slate-100">Task Execution Output</h2>
-                    <p id="drawer-task-id" class="text-xs font-mono text-cyan-400 mt-1"></p>
-                    </div>
-                    <button onclick="closeDrawer()" class="text-slate-400 hover:text-slate-100 font-bold px-2 py-1 text-xl cursor-pointer">
-                    &times;
-                    </button>
-                </div>
+      </main>
+    </div>
 
-                <div class="space-y-4">
-                    <div>
-                    <label class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1 block">STDOUT Output</label>
-                    <pre id="drawer-stdout" class="bg-slate-950 border border-slate-800 rounded p-3 text-xs font-mono text-slate-200 overflow-x-auto max-h-48"></pre>
-                    </div>
+    <!-- CHAT HANDLER SCRIPT -->
+     <script>
+        async function sendMessage(){
+            const input = document.getElementById("user-input");
+            const chatWindow = document.getElementById("chat-window");
+            const modelSelect = document.getElementById("model-select");
+            const prompt = input.value.trim();
 
-                    <div>
-                    <label class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1 block">STDERR Logs</label>
-                    <pre id="drawer-stderr" class="bg-slate-950 border border-slate-800 rounded p-3 text-xs font-mono text-rose-400 overflow-x-auto max-h-48"></pre>
+            if (!prompt) return;
+
+            // Render User Message
+            chatWindow.innerHTML += `
+                <div class="flex space-x-3 max-w-3xl ml-auto justify-end">
+                    <div class="bg-[#21262d] border border-[#30363d] rounded-lg p-4 text-sm text-[#c9d1d9]">
+                        <p>${escapeHTML(prompt)}</p>
                     </div>
                 </div>
-                </div>
-
-                <div class="pt-4 border-t border-slate-800">
-                <button onclick="closeDrawer()" class="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded border border-slate-700 cursor-pointer">
-                    Close Drawer
-                </button>
-                </div>
-            </div>
-        </div>
-    <script>
-        window.currentTasks = [];
-        
-        async function fetchDashboardData() {
-            try {
-                const res = await fetch('/api/tasks/history');
-                const tasks = await res.json();
-                window.currentTasks = tasks;
-
-                // Update Metrics
-                document.getElementById('metric-total').innerText = currentTasks.length;
-                document.getElementById('metric-executed').innerText = currentTasks.filter(t => t.status === 'EXECUTED').length;
-                document.getElementById('metric-pending').innerText = currentTasks.filter(t => t.status === 'PENDING').length;
-                document.getElementById('metric-failed').innerText = currentTasks.filter(t => t.status === 'FAILED' || t.status === 'REJECTED').length;
+            `;
             
-                // Render HITL Queue
-                const pendingTasks = currentTasks.filter(t => t.status === 'PENDING');
-                const queueContainer = document.getElementById('hitl-queue');
+            input.value = "";
+            chatWindow.scrollTop = chatWindow.scrollHeight;
 
-                if (pendingTasks.length === 0) {
-                    queueContainer.innerHTML = '<p class="text-slate-500 text-xs italic">No tasks currently awaiting approval.</p>';  
-                } else {
-                    queueContainer.innerHTML = pendingTasks.map(t => {
-                        const id = t.task_id || t.id;
-                        return `
-                            <div class="bg-slate-900 p-3 rounded border border-amber-500/20 flex justify-between items-center">
-                                <div>
-                                    <span class="text-amber-400 font-bold">[${t.risk_level}]</span>
-                                    <span class="text-slate-200 ml-2">${t.prompt}</span>
-                                    <p class="text-slate-400 text-[11px] font-mono mt-1">$ ${t.proposed_command}</p>
-                                </div>
-                                <div class="space-x-2">
-                                    <button onclick="respondTask('${t.id}', 'APPROVED')" class="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1 rounded text-xs">Approve</button>
-                                    <button onclick="respondTask('${t.id}', 'REJECTED')" class="bg-rose-600 hover:bg-rose-500 text-white px-3 py-1 rounded text-xs">Reject</button>
-                                </div>
-                            </div>
-                        `;
-                    }).join('');
-                }
+            // Temporary Loading Indicator
+            const loadingId = "loading-" + Date.now();
+            chatWindow.innerHTML += `
+                <div id="${loadingId}" class="flex space-x-3 max-w-3xl">
+                    <div class="w-8 h-8 rounded-full bg-[#238636] flex items-center justify-center text-white teaxt-xs font-bold shrink-0">AI</div>
+                    <div class="bg-[#161b22] border border-[#30363d] rounded-lg p-4 text-sm text-[#8b949e] animate-pulse">
+                        Thinking...
+                    </div>
+                </div>
+            `;
+            chatWindow.scrollTop = chatWindow.scrollHeight;
 
-                //Render Audit Table
-                document.getElementById('audit-table').innerHTML = currentTasks.map(t => {
-                    const taskId = t.task_id || t.id;
-                    return `
-                        <tr class="hover:bg-slate-800/30 transition border-b border-slate-800">
-                            <td class="py-3 px-4 font-mono text-xs text-slate-400 truncate">${t.id}</td>
-                            <td class="py-3 px-4 max-w-[220px]">
-                                <div class="overflow-x-auto whitespace-nowrap text-slate-200 font-medium custom-scrollbar pb-1">
-                                    ${t.prompt || 'N/A'}
-                                </div>
-                            </td>
-
-                            <td class="py-3 px-4 max-w-[260px]">
-                                <div class="overflow-x-auto whitespace-nowrap font-mono text-xs text-amber-400 custom-scrollbar amber-scrollbar pb-1">
-                                    $ ${t.proposed_command}
-                                </div>
-                            </td>
-                            <td class="py-3 px-4">
-                            <span class=px-2 py-0.5 text-xs font-semibold rounded bg-slate-800 text-slate-300 border border-slate-700">${t.risk_level}</span>
-                            </td>
-                            <td class="py-3 px-4">
-                            <span class="px-2 py-0.5 text-xs font-semibold rounded ${getStatusStyle(t.status)}">${t.status}</span>
-                            </td>
-                            <td class="py-3 px-4 text-right">
-                            <button onclick="openDrawer('${t.id}')" class="text-xs text-cyan-400 hover:text-cyan-300 font-medium underline cursor-pointer">
-                                Inspect
-                            </button>
-                            </td>
-                        </tr>
-                    `;
-                }).join('');
-
-            } catch (err) {
-                console.error("Failed to update dashboard data:", err);
-            }
-        }
-
-        function getStatusStyle(status) {
-            switch(status) {
-                case 'EXECUTED': return 'bg-emerald-950/80 text-emerald-400 border border-emerald-800';
-                case 'PENDING': return 'bg-amber-950/80 text-amber-400 border border-amber-800';
-                case 'REJECTED': return 'bg-slate-700 text-slate-300 border border-amber-800';
-                case 'FAILED': return 'bg-rose-950/80 text-rose-400 border border-rose-800';
-                default: return 'bg-slate-800 text-slate-400';
-            }
-        }
-
-        async function respondTask(id, action) {
-            try {
-                const res = await fetch(`/api/tasks/${id}/respond`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action })
+            try{
+                const response = await fetch("/api/chat", {
+                    method: "POST",
+                    headers: { "Content-Type" : "application/json" },
+                    body: JSON.stringify({
+                        model:document.getElementById("model-select").value,
+                        messages:[{ role: "user", content: prompt }],
+                        stream: false
+                    })
                 });
-            
 
-                if (res.ok) {
-                    await fetchDashboardData();
-                } else {
-                    console.error("Failed to post response:", await res.text());
-                }
+                const data = await response.json();
+                document.getElementById(loadingId).remove();
+
+                // Render Model Response
+                chatWindow.innerHTML += `
+                    <div id="${loadingId}" class="flex space-x-3 max-w-3xl">
+                        <div class="w-8 h-8 rounded-full bg-[#238636] flex items-center justify-center text-white teaxt-xs font-bold shrink-0">AI</div>
+                        <div class="bg-[#161b22] border border-[#30363d] rounded-lg p-4 text-sm text-[#c9d1d9]">
+                            <span class="whitespace-pre-wrap">${escapeHTML(data.message.content)}</span>
+                        </div>
+                    </div>
+                `;
             } catch (err) {
-                console.error("Error responsding to task:", err);
+                const loadingEl = document.getElementById(loadingId);
+                if(loadingEl) loadingEl.remove();
+
+                chatWindow.innerHTML += `
+                    <div class+"p-3 bg-red-900/30 border border-red-500/50 rounded-md text-red-200 text-xs">
+                        Failed to connect to local Ollama instance on port 11434.
+                    </div>
+                `;
             }
+
+            chatWindow.scrollTop = chatWindow.scrollHeight;
         }
 
-        function openDrawer(taskId) {
-            const task = currentTasks.find(t => (t.task_id || t.id) === taskId);
-            if (!task) return;
-
-            document.getElementById('drawer-task-id').innerText = `#${task.task_id || task.id}`;
-            
-            // Display explicit success confirmation if executed but stdout was silent
-            const stdoutText = task.stdout && task.stdout.trim() !== ''
-                ? task.stdout
-                : (task.status === 'EXECUTED' ? '[Process exit with code 0 - No output produced]' : 'No output recorded.');
-            document.getElementById('drawer-stdout').innerText = stdoutText;
-            document.getElementById('drawer-stderr').innerText = task.stderr || 'No errors recorded.';
-
-            // Show drawer overlay
-            document.getElementById('terminal-drawer').classList.remove('hidden');
+        function escapeHTML(str) {
+            return str.replace(/[&<>"']/g, match => ({
+                '&': '&amp', '<': '&lt;', '>': '&gt', '"': '&quot', "'": '&#39;'
+            }[match]));
         }
 
-        function closeDrawer() {
-            document.getElementById('terminal-drawer').classList.add('hidden');
+        function logout() {
+            localStorage.removeItem("isLoggedIn");
+            window.location.href = "/login";
         }
-
-        // Poll every 3 seconds
-        setInterval(fetchDashboardData, 3000);
-        fetchDashboardData();
-    </script>
+     </script>
   </body>
 </html>

@@ -288,8 +288,8 @@ impl QdrantService {
     pub async fn get_embedding(&self, text: &str) -> Result<Vec<f32>> {
         generate_ollama_embedding(&self.http_client, text).await
     }
+    
     #[allow(dead_code)]
-
     pub async fn search_by_text(&self, text: &str, limit: u64) -> Result<Vec<String>> {
         let vector = self.get_embedding(text).await?;
         self.search(vector, limit).await
@@ -332,7 +332,7 @@ mod tests {
         let qdrant = QdrantService::new().await?;
 
         // Sample operational runbooks to eliminate command hallucinations
-        let runbooks = vec![
+        let runbooks = [
             "HOST RUNBOOK - SYSTEM SERVICES: Available systemd units are 'api-gateway.service', 'postgres.service', and 'qdrant.service. Use 'systemctl restart <unit>' to manage them.",
             "HOST RUNBOOK - STORAGE & DISK: Root filesystem is on /dev/mapper/pve-vm--103--disk--0. To check disk space, use 'df -h'.",
             "HOST RUNBOOK - CONTAINERS: Host uses local Docker engine for containers. To clean up prune containers, use 'docker container prune -f'. Do NOT use kubectl; Kubernetes is not running on this host.",
