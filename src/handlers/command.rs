@@ -119,15 +119,15 @@ pub async fn handle_task_submission(
                 SafetyAction::EscalateToCloud => {
                     eprintln!("[Monitor Warning]: Context saturation high (>88%). Escalating request...");
 
-                    let cloud_res = None;
+                    let mut cloud_res = None;
                     if let Some(ref cloud_client) = state.cloud_client {
                         if let Ok(cloud_response) = cloud_client.completion(&prompt).await {
                             // Return cloud response directly or format it into ollama_answer
-                            let _cloud_res = Some(cloud_response);
+                            cloud_res = Some(cloud_response);
                         }
                     }
                     // Return cloud response if successful, otherwise fall back to empty/error string
-                    cloud_res.unwrap_or("Failed to escalate to cloud model.".to_string())
+                    cloud_res.unwrap_or_else(|| "Failed to escalate to cloud model.".to_string())
                 }
                 SafetyAction::PruneContext => {
                     eprintln!("[Monitor Warning]: Context saturation moderate (>75%). Pruning context...");
@@ -259,7 +259,7 @@ pub async fn handle_task_submission(
                 ).await;
             }
             
-            return Ok(Json(TaskResponse {
+            Ok(Json(TaskResponse {
                 status: status.to_string(),
                 message: format!("Command '{}' executed successfully.", proposed_command),
                 task_id: Some(task_id),
